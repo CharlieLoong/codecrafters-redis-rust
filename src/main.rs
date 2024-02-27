@@ -28,8 +28,7 @@ fn handle_stream(stream: &mut std::net::TcpStream) {
     const PONG: &[u8] = "+PONG\r\n".as_bytes();
     let mut buffer = [0; 1024];
 
-    let bytes_read = stream.read(&mut buffer).unwrap();
-    while bytes_read > 0 {
+    while let Ok(bytes_read) = stream.read(&mut buffer) {
         println!(
             "received: {}",
             String::from_utf8_lossy(&buffer[..bytes_read])
