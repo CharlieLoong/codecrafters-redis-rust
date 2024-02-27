@@ -1,6 +1,6 @@
 // Uncomment this block to pass the first stage
+use std::io::Write;
 use std::net::TcpListener;
-use std::{io::Write, net::TcpListener};
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
