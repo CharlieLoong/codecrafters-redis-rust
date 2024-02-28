@@ -1,26 +1,54 @@
 mod redis;
 mod resp;
 
-// Uncomment this block to pass the first stage
-
 use std::{
+    env::args,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use anyhow::{anyhow, Result};
+// use clap::Parser;
 use resp::Value;
 use tokio::net::{TcpListener, TcpStream};
 
+/// Simple program to greet a person
+// #[derive(Parser, Debug)]
+// #[command(version, about, long_about = None)]
+// struct Args {
+//     #[arg(short, long, default_value_t = 6379)]
+//     port: u16,
+// }
+
 #[tokio::main]
 async fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
+    let args: Vec<String> = args().collect();
+    let mut port: u16 = 6379;
+    for i in 0..args.len() {
+        if args[i] == "--port" && i < args.len() {
+            match args[i + 1].parse::<u16>() {
+                Ok(_port) => {
+                    if _port < 1 || _port > 65535 {
+                        panic!("Error: Invalid port number {}", args[i + 1]);
+                    }
+                    port = _port
+                }
+                Err(_) => {
+                    panic!("Error: Invalid port number {}", args[i + 1]);
+                }
+            }
+        }
+    }
+
     println!("Logs from your program will appear here!");
 
     let redis = redis::Redis::new();
     let redis = Arc::new(Mutex::new(redis));
 
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        .await
+        .expect("failed to bind");
+    println!("listening on port {}", port);
 
     loop {
         let stream = listener.accept().await;
