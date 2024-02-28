@@ -1,6 +1,9 @@
+mod redis;
 mod resp;
 
 // Uncomment this block to pass the first stage
+
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use resp::Value;
@@ -11,8 +14,9 @@ async fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    // Uncomment this block to pass the first stage
-    //
+    let redis = redis::Redis::new();
+    let redis = Arc::new(Mutex::new(redis));
+
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     loop {
@@ -22,7 +26,8 @@ async fn main() {
             Ok((mut _stream, _)) => {
                 println!("accepted new connection");
                 //handle_stream(&mut _stream);
-                tokio::spawn(async move { handle_stream(_stream).await });
+                let redis_clone = Arc::clone(&redis);
+                tokio::spawn(async move { handle_stream(_stream, redis_clone).await });
             }
             Err(e) => {
                 eprintln!("error: {}", e);
@@ -31,7 +36,7 @@ async fn main() {
     }
 }
 
-async fn handle_stream(stream: TcpStream) {
+async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>) {
     let mut handler = resp::RespHandler::new(stream);
 
     loop {
@@ -39,9 +44,25 @@ async fn handle_stream(stream: TcpStream) {
 
         let response = if let Some(v) = value {
             let (command, args) = extract_command(v).unwrap();
-            match command.as_str() {
+            match command.to_lowercase().as_str() {
                 "ping" => Value::SimpleString("PONG".to_string()),
                 "echo" => args.first().unwrap().clone(),
+                "set" => {
+                    let key = unpack_bulk_str(args[0].clone()).unwrap();
+                    let value = unpack_bulk_str(args[1].clone()).unwrap();
+                    redis_clone
+                        .lock()
+                        .unwrap()
+                        .set(key, redis::RedisValue::String(value));
+                    Value::SimpleString("OK".to_string())
+                }
+                "get" => {
+                    let key = unpack_bulk_str(args[0].clone()).unwrap();
+                    match redis_clone.lock().unwrap().get(key) {
+                        Some(val) => Value::BulkString(val),
+                        None => Value::SimpleString("(nil)".to_string()),
+                    }
+                }
                 _ => panic!("Unknown command"),
             }
         } else {
