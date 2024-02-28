@@ -3,7 +3,10 @@ mod resp;
 
 // Uncomment this block to pass the first stage
 
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use anyhow::{anyhow, Result};
 use resp::Value;
@@ -50,17 +53,24 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>)
                 "set" => {
                     let key = unpack_bulk_str(args[0].clone()).unwrap();
                     let value = unpack_bulk_str(args[1].clone()).unwrap();
+                    let expr = if args.len() >= 4 {
+                        Some(Duration::from_millis(
+                            unpack_bulk_str(args[3].clone()).unwrap().parse().unwrap(),
+                        ))
+                    } else {
+                        None
+                    };
                     redis_clone
                         .lock()
                         .unwrap()
-                        .set(key, redis::RedisValue::String(value));
+                        .set(key, redis::RedisValue::String(value), expr);
                     Value::SimpleString("OK".to_string())
                 }
                 "get" => {
                     let key = unpack_bulk_str(args[0].clone()).unwrap();
                     match redis_clone.lock().unwrap().get(key) {
                         Some(val) => Value::BulkString(val),
-                        None => Value::SimpleString("(nil)".to_string()),
+                        None => Value::BulkString("".to_string()),
                     }
                 }
                 _ => panic!("Unknown command"),

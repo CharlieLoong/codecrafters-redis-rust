@@ -20,7 +20,10 @@ impl Value {
     pub fn serialize(self) -> String {
         match self {
             Value::SimpleString(s) => format!("+{}\r\n", s),
-            Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
+            Value::BulkString(s) => match s.len() {
+                0 => format!("$-1\r\n"),
+                _ => format!("${}\r\n{}\r\n", s.chars().count(), s),
+            },
             _ => panic!("Not implemented"),
         }
     }
