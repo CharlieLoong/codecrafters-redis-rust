@@ -12,6 +12,8 @@ use anyhow::{anyhow, Result};
 use resp::Value;
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::redis::Role;
+
 /// Simple program to greet a person
 // #[derive(Parser, Debug)]
 // #[command(version, about, long_about = None)]
@@ -22,27 +24,43 @@ use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = args().collect();
+    let mut args_iter = args().skip(1);
     let mut port: u16 = 6379;
-    for i in 0..args.len() {
-        if args[i] == "--port" || args[i] == "-p" && i < args.len() {
-            match args[i + 1].parse::<u16>() {
-                Ok(_port) => {
-                    if _port < 1 {
-                        panic!("Error: Invalid port number {}", args[i + 1]);
-                    }
-                    port = _port
-                }
-                Err(_) => {
-                    panic!("Error: Invalid port number {}", args[i + 1]);
-                }
+    let mut role = Role::Master;
+    let mut master_host = None;
+    let mut master_port = None;
+
+    while let Some(arg) = args_iter.next() {
+        match arg.to_lowercase().as_str() {
+            "--port" => {
+                port = args_iter
+                    .next()
+                    .unwrap()
+                    .parse::<u16>()
+                    .expect("invalid port number")
             }
+            "--replicaof" => {
+                role = Role::Slave;
+                master_host = Some(args_iter.next().unwrap());
+                master_port = Some(
+                    args_iter
+                        .next()
+                        .unwrap()
+                        .parse::<u16>()
+                        .expect("invalid port number"),
+                );
+            }
+            _ => {}
         }
     }
 
     println!("Logs from your program will appear here!");
 
-    let redis = redis::Redis::new();
+    let redis = if role == Role::Master {
+        redis::Redis::new()
+    } else {
+        redis::Redis::slave(format!("{}:{}", master_host.unwrap(), master_port.unwrap()))
+    };
     let redis = Arc::new(Mutex::new(redis));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
@@ -101,7 +119,12 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>)
                         None => Value::BulkString("".to_string()),
                     }
                 }
-                "info" => Value::BulkString("# Replication\nrole:master\n".to_string()),
+                "info" => {
+                    match redis_clone.lock().unwrap().role {
+                        Role::Master => Value::BulkString("role:master".to_string()),
+                        Role::Slave => Value::BulkString("role:slave".to_string())
+                    }
+                }
                 _ => panic!("Unknown command"),
             }
         } else {

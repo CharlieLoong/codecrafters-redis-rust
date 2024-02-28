@@ -7,10 +7,17 @@ use std::{
 pub enum RedisValue {
     String(String),
 }
+#[derive(PartialEq)]
+pub enum Role {
+    Master,
+    Slave,
+}
 
 pub struct Redis {
     store: HashMap<String, (RedisValue, SystemTime)>,
     expr: Duration,
+    pub role: Role,
+    master_host: Option<String>,
 }
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);
 
@@ -19,6 +26,18 @@ impl Redis {
         Self {
             store: HashMap::<String, (RedisValue, SystemTime)>::new(),
             expr: DEFAULT_EXPIRY,
+            role: Role::Master,
+            master_host: None,
+        }
+    }
+
+    pub fn slave(master_host: String) -> Self {
+        // TODO
+        Self {
+            store: HashMap::<String, (RedisValue, SystemTime)>::new(),
+            expr: DEFAULT_EXPIRY,
+            role: Role::Slave,
+            master_host: Some(master_host),
         }
     }
 
