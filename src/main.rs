@@ -25,10 +25,10 @@ async fn main() {
     let args: Vec<String> = args().collect();
     let mut port: u16 = 6379;
     for i in 0..args.len() {
-        if args[i] == "--port" && i < args.len() {
+        if args[i] == "--port" || args[i] == "-p" && i < args.len() {
             match args[i + 1].parse::<u16>() {
                 Ok(_port) => {
-                    if _port < 1 || _port > 65535 {
+                    if _port < 1 {
                         panic!("Error: Invalid port number {}", args[i + 1]);
                     }
                     port = _port
@@ -101,6 +101,7 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>)
                         None => Value::BulkString("".to_string()),
                     }
                 }
+                "info" => Value::BulkString("# Replication\nrole:master\n".to_string()),
                 _ => panic!("Unknown command"),
             }
         } else {
