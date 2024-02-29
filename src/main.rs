@@ -167,7 +167,7 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>,
                 "info" => Value::BulkString(redis_clone.lock().unwrap().info()),
                 "replconf" => Value::SimpleString("OK".to_string()),
                 "psync" => Value::SimpleString(format!(
-                    "FULLRESYNC {}",
+                    "FULLRESYNC {} 0",
                     redis_clone.lock().unwrap().master_replid.clone().unwrap()
                 )),
 
