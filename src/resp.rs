@@ -24,6 +24,13 @@ impl Value {
                 0 => format!("$-1\r\n"),
                 _ => format!("${}\r\n{}\r\n", s.chars().count(), s),
             },
+            Value::Array(a) => {
+                let mut s = String::new();
+                for v in &a {
+                    s.push_str(&<Value as Clone>::clone(&v).serialize());
+                }
+                format!("*{}\r\n{}", a.len(), s)
+            }
             _ => panic!("Not implemented"),
         }
     }

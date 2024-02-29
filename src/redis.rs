@@ -1,4 +1,7 @@
 use rand::{distributions::Alphanumeric, Rng};
+
+use std::net::Ipv4Addr;
+
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
@@ -18,7 +21,8 @@ pub struct Redis {
     store: HashMap<String, (RedisValue, SystemTime)>,
     expr: Duration,
     pub role: Role,
-    master_host: Option<String>,
+    master_host: Option<Ipv4Addr>,
+    master_port: Option<u16>,
     master_replid: Option<String>,
     master_repl_offset: u64,
 }
@@ -31,18 +35,21 @@ impl Redis {
             expr: DEFAULT_EXPIRY,
             role: Role::Master,
             master_host: None,
+            master_port: None,
             master_replid: Some(gen_id()),
             master_repl_offset: 0,
         }
     }
 
-    pub fn slave(master_host: String) -> Self {
-        // TODO
+    pub fn slave(master_host: Ipv4Addr, master_port: u16) -> Self {
+        // HandShake to master
+
         Self {
             store: HashMap::<String, (RedisValue, SystemTime)>::new(),
             expr: DEFAULT_EXPIRY,
             role: Role::Slave,
             master_host: Some(master_host),
+            master_port: Some(master_port),
             master_replid: None,
             master_repl_offset: 0,
         }
@@ -72,7 +79,10 @@ impl Redis {
         match self.role {
             Role::Master => {
                 info.push(format!("role:master"));
-                info.push(format!("master_replid:{}", self.master_replid.clone().unwrap()));
+                info.push(format!(
+                    "master_replid:{}",
+                    self.master_replid.clone().unwrap()
+                ));
                 info.push(format!("master_repl_offset:{}", self.master_repl_offset));
             }
             Role::Slave => {
@@ -85,7 +95,9 @@ impl Redis {
 
 fn gen_id() -> String {
     let mut rng = rand::thread_rng();
-    let random_string: String = (0..40).map(|_| rng.sample(Alphanumeric).to_string()).collect();
+    let random_string: String = (0..40)
+        .map(|_| rng.sample(Alphanumeric).to_string())
+        .collect();
 
     random_string
 }

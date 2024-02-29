@@ -3,6 +3,7 @@ mod resp;
 
 use std::{
     env::args,
+    net::{Ipv4Addr, SocketAddrV4},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -28,6 +29,7 @@ async fn main() {
     let mut port: u16 = 6379;
     let mut role = Role::Master;
     let mut master_host = None;
+    let mut master_host_ipv4 = None;
     let mut master_port = None;
 
     while let Some(arg) = args_iter.next() {
@@ -59,8 +61,28 @@ async fn main() {
     let redis = if role == Role::Master {
         redis::Redis::new()
     } else {
-        redis::Redis::slave(format!("{}:{}", master_host.unwrap(), master_port.unwrap()))
+        master_host_ipv4 = if master_host.clone().unwrap() == "localhost" {
+            Some("127.0.0.1".parse::<Ipv4Addr>().unwrap())
+        } else {
+            Some(master_host.unwrap().parse::<Ipv4Addr>().unwrap())
+        };
+        redis::Redis::slave(master_host_ipv4.unwrap(), master_port.unwrap())
     };
+    if role == Role::Slave {
+        if let Ok(stream) = TcpStream::connect(SocketAddrV4::new(
+            master_host_ipv4.unwrap(),
+            master_port.unwrap(),
+        ))
+        .await
+        {
+            let message = Value::Array(vec![Value::BulkString("PING".to_string())]);
+            let mut handler = resp::RespHandler::new(stream);
+            handler.write_value(message).await.unwrap();
+        } else {
+            eprintln!("Could not connect to replication master");
+        }
+    }
+
     let redis = Arc::new(Mutex::new(redis));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
