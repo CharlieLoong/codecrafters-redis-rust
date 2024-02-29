@@ -1,4 +1,5 @@
 mod command;
+mod rdb;
 mod redis;
 mod resp;
 
@@ -10,8 +11,9 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
+use rdb::empty_rdb;
 // use clap::Parser;
-use resp::Value;
+use resp::{RespHandler, Value};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::redis::Role;
@@ -166,10 +168,16 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>,
                 }
                 "info" => Value::BulkString(redis_clone.lock().unwrap().info()),
                 "replconf" => Value::SimpleString("OK".to_string()),
-                "psync" => Value::SimpleString(format!(
-                    "FULLRESYNC {} 0",
-                    redis_clone.lock().unwrap().master_replid.clone().unwrap()
-                )),
+                "psync" => {
+                    println!("{}", Value::File(empty_rdb()).serialize());
+                    Value::Multiple(vec![
+                        Value::SimpleString(format!(
+                            "FULLRESYNC {} 0",
+                            redis_clone.lock().unwrap().master_replid.clone().unwrap()
+                        )),
+                        Value::File(empty_rdb()),
+                    ])
+                }
 
                 _ => panic!("Unknown command"),
             }

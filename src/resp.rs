@@ -15,6 +15,8 @@ pub enum Value {
     SimpleString(String),
     BulkString(String),
     Array(Vec<Value>),
+    File(Vec<u8>),
+    Multiple(Vec<Value>),
 }
 impl Value {
     pub fn serialize(self) -> String {
@@ -31,6 +33,13 @@ impl Value {
                 }
                 format!("*{}\r\n{}", a.len(), s)
             }
+            Value::File(f) => {
+                format!("${}\r\n{}", f.len(), hex::encode(&f))
+            }
+            Value::Multiple(values) => values
+                .iter()
+                .map(|v| <Value as Clone>::clone(&v).serialize())
+                .collect(),
             _ => panic!("Not implemented"),
         }
     }
