@@ -11,7 +11,7 @@ use std::{
 pub enum RedisValue {
     String(String),
 }
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum Role {
     Master,
     Slave,
@@ -21,19 +21,21 @@ pub struct Redis {
     store: HashMap<String, (RedisValue, SystemTime)>,
     expr: Duration,
     pub role: Role,
-    master_host: Option<Ipv4Addr>,
-    master_port: Option<u16>,
+    pub port: u16,
+    pub master_host: Option<Ipv4Addr>,
+    pub master_port: Option<u16>,
     master_replid: Option<String>,
     master_repl_offset: u64,
 }
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);
 
 impl Redis {
-    pub fn new() -> Self {
+    pub fn new(port: u16) -> Self {
         Self {
             store: HashMap::<String, (RedisValue, SystemTime)>::new(),
             expr: DEFAULT_EXPIRY,
             role: Role::Master,
+            port,
             master_host: None,
             master_port: None,
             master_replid: Some(gen_id()),
@@ -41,13 +43,14 @@ impl Redis {
         }
     }
 
-    pub fn slave(master_host: Ipv4Addr, master_port: u16) -> Self {
+    pub fn slave(port: u16, master_host: Ipv4Addr, master_port: u16) -> Self {
         // HandShake to master
 
         Self {
             store: HashMap::<String, (RedisValue, SystemTime)>::new(),
             expr: DEFAULT_EXPIRY,
             role: Role::Slave,
+            port,
             master_host: Some(master_host),
             master_port: Some(master_port),
             master_replid: None,

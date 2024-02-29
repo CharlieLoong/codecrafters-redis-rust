@@ -1,3 +1,4 @@
+mod command;
 mod redis;
 mod resp;
 
@@ -31,6 +32,7 @@ async fn main() {
     let mut master_host = None;
     let mut master_host_ipv4 = None;
     let mut master_port = None;
+    let mut is_slave = false;
 
     while let Some(arg) = args_iter.next() {
         match arg.to_lowercase().as_str() {
@@ -59,29 +61,16 @@ async fn main() {
     println!("Logs from your program will appear here!");
 
     let redis = if role == Role::Master {
-        redis::Redis::new()
+        redis::Redis::new(port)
     } else {
+        is_slave = true;
         master_host_ipv4 = if master_host.clone().unwrap() == "localhost" {
             Some("127.0.0.1".parse::<Ipv4Addr>().unwrap())
         } else {
             Some(master_host.unwrap().parse::<Ipv4Addr>().unwrap())
         };
-        redis::Redis::slave(master_host_ipv4.unwrap(), master_port.unwrap())
+        redis::Redis::slave(port, master_host_ipv4.unwrap(), master_port.unwrap())
     };
-    if role == Role::Slave {
-        if let Ok(stream) = TcpStream::connect(SocketAddrV4::new(
-            master_host_ipv4.unwrap(),
-            master_port.unwrap(),
-        ))
-        .await
-        {
-            let message = Value::Array(vec![Value::BulkString("PING".to_string())]);
-            let mut handler = resp::RespHandler::new(stream);
-            handler.write_value(message).await.unwrap();
-        } else {
-            eprintln!("Could not connect to replication master");
-        }
-    }
 
     let redis = Arc::new(Mutex::new(redis));
 
@@ -89,6 +78,34 @@ async fn main() {
         .await
         .expect("failed to bind");
     println!("listening on port {}", port);
+
+    if is_slave {
+        if let Ok(stream) = TcpStream::connect(SocketAddrV4::new(
+            master_host_ipv4.unwrap(),
+            master_port.unwrap(),
+        ))
+        .await
+        {
+            let ping = Value::Array(vec![Value::BulkString("PING".to_string())]);
+            let replconf1 = Value::Array(vec![
+                Value::BulkString("REPLCONF".to_string()),
+                Value::BulkString("listening-port".to_string()),
+                Value::BulkString(port.to_string()),
+            ]);
+            let replconf2 = Value::Array(vec![
+                Value::BulkString("REPLCONF".to_string()),
+                Value::BulkString("capa".to_string()),
+                Value::BulkString("psync2".to_string()),
+            ]);
+            let mut handler = resp::RespHandler::new(stream);
+            handler.write_value(ping).await.unwrap();
+            handler.write_value(replconf1).await.unwrap();
+            handler.write_value(replconf2).await.unwrap();
+            handler.read_value().await.unwrap();
+        } else {
+            eprintln!("Could not connect to replication master");
+        }
+    }
 
     loop {
         let stream = listener.accept().await;
@@ -98,7 +115,7 @@ async fn main() {
                 println!("accepted new connection");
                 //handle_stream(&mut _stream);
                 let redis_clone = Arc::clone(&redis);
-                tokio::spawn(async move { handle_stream(_stream, redis_clone).await });
+                tokio::spawn(async move { handle_stream(_stream, redis_clone, is_slave).await });
             }
             Err(e) => {
                 eprintln!("error: {}", e);
@@ -107,7 +124,7 @@ async fn main() {
     }
 }
 
-async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>) {
+async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>, is_slave: bool) {
     let mut handler = resp::RespHandler::new(stream);
 
     loop {
@@ -142,6 +159,8 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>)
                     }
                 }
                 "info" => Value::BulkString(redis_clone.lock().unwrap().info()),
+                "replconf" => Value::SimpleString("OK".to_string()),
+
                 _ => panic!("Unknown command"),
             }
         } else {
