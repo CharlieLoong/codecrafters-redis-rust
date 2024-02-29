@@ -119,12 +119,7 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>)
                         None => Value::BulkString("".to_string()),
                     }
                 }
-                "info" => {
-                    match redis_clone.lock().unwrap().role {
-                        Role::Master => Value::BulkString("role:master".to_string()),
-                        Role::Slave => Value::BulkString("role:slave".to_string())
-                    }
-                }
+                "info" => Value::BulkString(redis_clone.lock().unwrap().info()),
                 _ => panic!("Unknown command"),
             }
         } else {

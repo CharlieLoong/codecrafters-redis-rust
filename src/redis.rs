@@ -1,3 +1,4 @@
+use rand::{distributions::Alphanumeric, Rng};
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
@@ -18,6 +19,8 @@ pub struct Redis {
     expr: Duration,
     pub role: Role,
     master_host: Option<String>,
+    master_replid: Option<String>,
+    master_repl_offset: u64,
 }
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);
 
@@ -28,6 +31,8 @@ impl Redis {
             expr: DEFAULT_EXPIRY,
             role: Role::Master,
             master_host: None,
+            master_replid: Some(gen_id()),
+            master_repl_offset: 0,
         }
     }
 
@@ -38,6 +43,8 @@ impl Redis {
             expr: DEFAULT_EXPIRY,
             role: Role::Slave,
             master_host: Some(master_host),
+            master_replid: None,
+            master_repl_offset: 0,
         }
     }
 
@@ -59,4 +66,26 @@ impl Redis {
             None => None,
         }
     }
+
+    pub fn info(&self) -> String {
+        let mut info = vec![];
+        match self.role {
+            Role::Master => {
+                info.push(format!("role:master"));
+                info.push(format!("master_replid:{}", self.master_replid.clone().unwrap()));
+                info.push(format!("master_repl_offset:{}", self.master_repl_offset));
+            }
+            Role::Slave => {
+                info.push(format!("role:slave"));
+            }
+        }
+        info.join("\n")
+    }
+}
+
+fn gen_id() -> String {
+    let mut rng = rand::thread_rng();
+    let random_string: String = (0..40).map(|_| rng.sample(Alphanumeric).to_string()).collect();
+
+    random_string
 }
