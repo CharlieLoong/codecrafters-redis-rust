@@ -24,7 +24,7 @@ pub struct Redis {
     pub port: u16,
     pub master_host: Option<Ipv4Addr>,
     pub master_port: Option<u16>,
-    master_replid: Option<String>,
+    pub master_replid: Option<String>,
     master_repl_offset: u64,
 }
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);

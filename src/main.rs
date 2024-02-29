@@ -97,11 +97,17 @@ async fn main() {
                 Value::BulkString("capa".to_string()),
                 Value::BulkString("psync2".to_string()),
             ]);
+            let psync = Value::Array(vec![
+                Value::BulkString("PSYNC".to_string()),
+                Value::BulkString("?".to_string()),
+                Value::BulkString("-1".to_string()),
+            ]);
             let mut handler = resp::RespHandler::new(stream);
             handler.write_value(ping).await.unwrap();
             handler.write_value(replconf1).await.unwrap();
             handler.write_value(replconf2).await.unwrap();
-            handler.read_value().await.unwrap();
+            handler.write_value(psync).await.unwrap();
+            while let Some(v) = handler.read_value().await.unwrap() {}
         } else {
             eprintln!("Could not connect to replication master");
         }
@@ -160,6 +166,10 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>,
                 }
                 "info" => Value::BulkString(redis_clone.lock().unwrap().info()),
                 "replconf" => Value::SimpleString("OK".to_string()),
+                "psync" => Value::SimpleString(format!(
+                    "FULLRESYNC {}",
+                    redis_clone.lock().unwrap().master_replid.clone().unwrap()
+                )),
 
                 _ => panic!("Unknown command"),
             }
