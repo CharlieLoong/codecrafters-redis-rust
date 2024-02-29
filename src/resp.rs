@@ -17,6 +17,7 @@ pub enum Value {
     Array(Vec<Value>),
     File(Vec<u8>),
     Multiple(Vec<Value>),
+    Empty,
 }
 impl Value {
     pub fn serialize(self) -> String {
@@ -40,7 +41,7 @@ impl Value {
                 .iter()
                 .map(|v| <Value as Clone>::clone(&v).serialize())
                 .collect(),
-            _ => panic!("Not implemented"),
+            _ => "".to_string(),
         }
     }
 }
@@ -64,8 +65,21 @@ impl RespHandler {
         Ok(Some(v))
     }
 
+    pub async fn read_bytes(&mut self) -> Result<Option<usize>> {
+        let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
+        if bytes_read == 0 {
+            return Ok(None);
+        }
+        Ok(Some(bytes_read))
+    }
+
     pub async fn write_value(&mut self, value: Value) -> Result<()> {
         self.stream.write(value.serialize().as_bytes()).await?;
+        Ok(())
+    }
+
+    pub async fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.stream.write(bytes).await?;
         Ok(())
     }
 }

@@ -13,7 +13,7 @@ use std::{
 use anyhow::{anyhow, Result};
 use rdb::empty_rdb;
 // use clap::Parser;
-use resp::{RespHandler, Value};
+use resp::Value;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::redis::Role;
@@ -109,7 +109,7 @@ async fn main() {
             handler.write_value(replconf1).await.unwrap();
             handler.write_value(replconf2).await.unwrap();
             handler.write_value(psync).await.unwrap();
-            while let Some(v) = handler.read_value().await.unwrap() {}
+            while let Some(_) = handler.read_bytes().await.unwrap() {}
         } else {
             eprintln!("Could not connect to replication master");
         }
@@ -132,7 +132,7 @@ async fn main() {
     }
 }
 
-async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>, is_slave: bool) {
+async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>, _is_slave: bool) {
     let mut handler = resp::RespHandler::new(stream);
 
     loop {
@@ -169,14 +169,28 @@ async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>,
                 "info" => Value::BulkString(redis_clone.lock().unwrap().info()),
                 "replconf" => Value::SimpleString("OK".to_string()),
                 "psync" => {
-                    println!("{}", Value::File(empty_rdb()).serialize());
-                    Value::Multiple(vec![
-                        Value::SimpleString(format!(
+                    //println!("{:?}", Value::File(empty_rdb()).serialize().as_bytes());
+                    // Value::Multiple(vec![
+                    //     Value::SimpleString(format!(
+                    //         "FULLRESYNC {} 0",
+                    //         redis_clone.lock().unwrap().master_replid.clone().unwrap()
+                    //     )),
+                    //     Value::File(empty_rdb()),
+                    // ])
+                    handler
+                        .write_value(Value::SimpleString(format!(
                             "FULLRESYNC {} 0",
                             redis_clone.lock().unwrap().master_replid.clone().unwrap()
-                        )),
-                        Value::File(empty_rdb()),
-                    ])
+                        )))
+                        .await
+                        .unwrap();
+                    handler
+                        .write_bytes(format!("${}\r\n", empty_rdb().len()).as_bytes())
+                        .await
+                        .unwrap();
+                    handler.write_bytes(&empty_rdb()).await.unwrap();
+
+                    Value::Empty
                 }
 
                 _ => panic!("Unknown command"),
