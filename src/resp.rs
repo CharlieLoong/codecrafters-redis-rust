@@ -1,15 +1,18 @@
 use anyhow::Result;
 use anyhow::{anyhow, Ok};
+use bytes::Bytes;
+#[allow(dead_code)]
+use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::UnboundedReceiver;
 
-use bytes::BytesMut;
-
-pub struct RespHandler<'a> {
-    stream: &'a mut TcpStream,
+pub struct RespHandler {
+    pub stream: TcpStream,
     buffer: BytesMut,
+    receiver: UnboundedReceiver<Bytes>,
 }
-#[allow(dead_code)]
+
 #[derive(Debug, Clone)]
 pub enum Value {
     SimpleString(String),
@@ -53,23 +56,37 @@ impl Value {
     }
 }
 
-impl<'a> RespHandler<'a> {
-    pub fn new(stream: &'a mut TcpStream) -> Self {
+impl RespHandler {
+    pub fn new(stream: TcpStream, receiver: UnboundedReceiver<Bytes>) -> Self {
         Self {
             stream,
             buffer: BytesMut::with_capacity(512),
+            receiver,
         }
     }
 
     pub async fn read_value(&mut self) -> Result<Option<Value>> {
-        let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
+        tokio::select! {
+          bytes_read = self.stream.read_buf(&mut self.buffer) => {
+            let bytes_read = bytes_read.unwrap_or(0);
+            if bytes_read == 0 {
+                return Ok(None);
+            }
+            let (v, _) = parse_message(self.buffer.split())?;
+            Ok(Some(v))
+          }
+          cmd = self.receiver.recv() => {
+                    if let Some(cmd) = cmd {
+                        println!("receiving cmd from master, {:?}", cmd);
+                        self.stream.write_all(cmd.as_ref()).await?;
+                        self.stream.flush().await?;
+                        // handler.write_bytes(cmd.as_ref()).await.unwrap();
+                    }
+                    Ok(None)
 
-        if bytes_read == 0 {
-            return Ok(None);
+                }
+
         }
-
-        let (v, _) = parse_message(self.buffer.split())?;
-        Ok(Some(v))
     }
 
     pub async fn read_bytes(&mut self) -> Result<Option<usize>> {
@@ -88,6 +105,29 @@ impl<'a> RespHandler<'a> {
     pub async fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         self.stream.write(bytes).await?;
         Ok(())
+    }
+
+    async fn handshake(&mut self, port: u16) {
+        let ping = Value::Array(vec![Value::BulkString("PING".to_string())]);
+        let replconf1 = Value::Array(vec![
+            Value::BulkString("REPLCONF".to_string()),
+            Value::BulkString("listening-port".to_string()),
+            Value::BulkString(port.to_string()),
+        ]);
+        let replconf2 = Value::Array(vec![
+            Value::BulkString("REPLCONF".to_string()),
+            Value::BulkString("capa".to_string()),
+            Value::BulkString("psync2".to_string()),
+        ]);
+        let psync = Value::Array(vec![
+            Value::BulkString("PSYNC".to_string()),
+            Value::BulkString("?".to_string()),
+            Value::BulkString("-1".to_string()),
+        ]);
+        self.write_value(ping).await.unwrap();
+        self.write_value(replconf1).await.unwrap();
+        self.write_value(replconf2).await.unwrap();
+        self.write_value(psync).await.unwrap();
     }
 }
 

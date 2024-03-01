@@ -5,22 +5,25 @@ mod redis;
 mod resp;
 
 use std::{
-    env::args, net::{Ipv4Addr, SocketAddr, SocketAddrV4}, sync::Arc, time::Duration
+    env::args,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use rdb::empty_rdb;
 use redis::Replica;
 // use clap::Parser;
 use resp::Value;
 use tokio::{
-    io::AsyncWriteExt, net::{TcpListener, TcpStream}, sync::{mpsc, Mutex}
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    sync::{mpsc, Mutex},
 };
 
 use crate::redis::Role;
-
-
 
 /// Simple program to greet a person
 // #[derive(Parser, Debug)]
@@ -67,6 +70,7 @@ async fn main() {
     }
 
     println!("Logs from your program will appear here!");
+    let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
 
     let redis = if role == Role::Master {
         redis::Redis::new(port)
@@ -111,13 +115,13 @@ async fn main() {
                 Value::BulkString("?".to_string()),
                 Value::BulkString("-1".to_string()),
             ]);
-            let mut handler = resp::RespHandler::new(&mut stream);
+            let mut handler = resp::RespHandler::new(stream, rx);
             handler.write_value(ping).await.unwrap();
             handler.write_value(replconf1).await.unwrap();
             handler.write_value(replconf2).await.unwrap();
             handler.write_value(psync).await.unwrap();
             let redis_clone = Arc::clone(&redis);
-            tokio::spawn(async move { handle_stream(stream, redis_clone).await });
+            tokio::spawn(async move { handle_stream(handler.stream, redis_clone).await });
         } else {
             eprintln!("Could not connect to replication master");
         }
@@ -141,47 +145,47 @@ async fn main() {
     }
 }
 
-async fn _handshake_to_master(master_socket: SocketAddr, port: u16) {
-    if let Ok(mut stream) = TcpStream::connect(master_socket).await {
-        let ping = Value::Array(vec![Value::BulkString("PING".to_string())]);
-        let replconf1 = Value::Array(vec![
-            Value::BulkString("REPLCONF".to_string()),
-            Value::BulkString("listening-port".to_string()),
-            Value::BulkString(port.to_string()),
-        ]);
-        let replconf2 = Value::Array(vec![
-            Value::BulkString("REPLCONF".to_string()),
-            Value::BulkString("capa".to_string()),
-            Value::BulkString("psync2".to_string()),
-        ]);
-        let psync = Value::Array(vec![
-            Value::BulkString("PSYNC".to_string()),
-            Value::BulkString("?".to_string()),
-            Value::BulkString("-1".to_string()),
-        ]);
-        let mut handler = resp::RespHandler::new(&mut stream);
-        handler.write_value(ping).await.unwrap();
-        handler.write_value(replconf1).await.unwrap();
-        handler.write_value(replconf2).await.unwrap();
-        handler.write_value(psync).await.unwrap();
-        while let Some(_) = handler.read_bytes().await.unwrap() {}
-    } else {
-        eprintln!("Could not connect to replication master");
-    }
-}
+// async fn _handshake_to_master(master_socket: SocketAddr, port: u16) {
+//     if let Ok(mut stream) = TcpStream::connect(master_socket).await {
+//         let ping = Value::Array(vec![Value::BulkString("PING".to_string())]);
+//         let replconf1 = Value::Array(vec![
+//             Value::BulkString("REPLCONF".to_string()),
+//             Value::BulkString("listening-port".to_string()),
+//             Value::BulkString(port.to_string()),
+//         ]);
+//         let replconf2 = Value::Array(vec![
+//             Value::BulkString("REPLCONF".to_string()),
+//             Value::BulkString("capa".to_string()),
+//             Value::BulkString("psync2".to_string()),
+//         ]);
+//         let psync = Value::Array(vec![
+//             Value::BulkString("PSYNC".to_string()),
+//             Value::BulkString("?".to_string()),
+//             Value::BulkString("-1".to_string()),
+//         ]);
+//         let mut handler = resp::RespHandler::new(stream, );
+//         handler.write_value(ping).await.unwrap();
+//         handler.write_value(replconf1).await.unwrap();
+//         handler.write_value(replconf2).await.unwrap();
+//         handler.write_value(psync).await.unwrap();
+//         while let Some(_) = handler.read_bytes().await.unwrap() {}
+//     } else {
+//         eprintln!("Could not connect to replication master");
+//     }
+// }
 
 async fn handle_stream(
     mut stream: TcpStream,
     redis_clone: Arc<Mutex<redis::Redis>>,
     // slaves: Mutex<Vec<Replica>>,
 ) {
-    let mut handler = resp::RespHandler::new(&mut stream);
+    //let mut handler = resp::RespHandler::new(stream);
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
 
+    let mut handler = resp::RespHandler::new(stream, rx);
     loop {
         // let value = handler.read_value().await.unwrap();
-
         tokio::select! {
             value = handler.read_value() => {
                 let response = if let Ok(Some(v)) = value {
@@ -250,14 +254,15 @@ async fn handle_stream(
             handler.write_value(response).await.unwrap();
 
             }
-            cmd = rx.recv() => {
-                    if let Some(cmd) = cmd {
-                        println!("Sending command to replicas, {:?}", cmd);
-                        stream.write_all(cmd.as_ref()).await.unwrap();
-                        handler.write_bytes(cmd.as_ref()).await.unwrap();
-                    }
+            // cmd = rx.recv() => {
+            //         if let Some(cmd) = cmd {
+            //             println!("receiving cmd from master, {:?}", cmd);
+            //             handler.stream.write_all(cmd.as_ref()).await.unwrap();
+            //             handler.stream.flush().await;
+            //             // handler.write_bytes(cmd.as_ref()).await.unwrap();
+            //         }
 
-                }
+            //     }
         }
 
         // let response = if let Some(v) = value {
