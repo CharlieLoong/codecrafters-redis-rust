@@ -83,7 +83,7 @@ impl Redis {
         value: RedisValue,
         expr: Option<Duration>,
     ) -> Result<()> {
-        // println!("set happens on {}", self.port);
+        println!("set happens on {}", self.port);
         self.store.insert(
             key.clone(),
             (value.clone(), SystemTime::now() + expr.unwrap_or(self.expr)),

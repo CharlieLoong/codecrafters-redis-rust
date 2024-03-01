@@ -1,8 +1,8 @@
 use anyhow::Result;
 use anyhow::{anyhow, Ok};
-use bytes::Bytes;
 #[allow(dead_code)]
 use bytes::BytesMut;
+use bytes::{BufMut, Bytes};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -40,10 +40,13 @@ impl Value {
             Value::File(f) => {
                 format!("${}\r\n{}", f.len(), hex::encode(&f))
             }
-            Value::Multiple(values) => values
-                .iter()
-                .map(|v| <Value as Clone>::clone(&v).serialize())
-                .collect(),
+            Value::Multiple(mut values) => {
+                values.insert(0, Value::BulkString("Multiple".to_string()));
+                values
+                    .iter()
+                    .map(|v| <Value as Clone>::clone(&v).serialize())
+                    .collect()
+            }
             _ => "".to_string(),
         }
     }
@@ -66,11 +69,27 @@ impl RespHandler {
     }
 
     pub async fn read_value(&mut self) -> Result<Option<Value>> {
-        let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
+        let bytes_read = if !self.buffer.is_empty() { self.buffer.len() } else { self.stream.read_buf(&mut self.buffer).await? };
         if bytes_read == 0 {
             return Ok(None);
         }
-        let (v, _) = parse_message(self.buffer.split())?;
+        let bytes = self.buffer.split();
+        let (v, consumed) = parse_message(bytes.clone())?;
+        println!("consumed: {}, read: {}", consumed, bytes_read);
+        if bytes_read - consumed > 0 {
+            self.buffer.put(&bytes[consumed..]);
+        }
+        // bytes_read -= consumed;
+        // if bytes_read == 0 {
+        //     return Ok(Some(v));
+        // }
+        // let mut vec = vec![v];
+        // while bytes_read > 0 {
+        //     let (v, consumed) = parse_message(self.buffer.split())?;
+        //     bytes_read -= consumed;
+        //     vec.push(v);
+        // }
+        // Ok(Some(Value::Multiple(vec)))
         Ok(Some(v))
     }
 

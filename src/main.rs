@@ -199,7 +199,7 @@ async fn handle_stream(
                     "ping" => Value::SimpleString("PONG".to_string()),
                     "echo" => args.first().unwrap().clone(),
                     "set" => {
-                        // println!("{:?}",args);
+                        println!("{:?}",args);
                         let key = unpack_bulk_str(args[0].clone()).unwrap();
                         let val = unpack_bulk_str(args[1].clone()).unwrap();
                         let expr = if args.len() >= 4 {
