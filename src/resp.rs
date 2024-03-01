@@ -10,7 +10,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 pub struct RespHandler {
     pub stream: TcpStream,
     buffer: BytesMut,
-    receiver: UnboundedReceiver<Bytes>,
+    // pub receiver: UnboundedReceiver<BytesMut>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,36 +57,21 @@ impl Value {
 }
 
 impl RespHandler {
-    pub fn new(stream: TcpStream, receiver: UnboundedReceiver<Bytes>) -> Self {
+    pub fn new(stream: TcpStream) -> Self {
         Self {
             stream,
             buffer: BytesMut::with_capacity(512),
-            receiver,
+            // receiver,
         }
     }
 
     pub async fn read_value(&mut self) -> Result<Option<Value>> {
-        tokio::select! {
-          bytes_read = self.stream.read_buf(&mut self.buffer) => {
-            let bytes_read = bytes_read.unwrap_or(0);
-            if bytes_read == 0 {
-                return Ok(None);
-            }
-            let (v, _) = parse_message(self.buffer.split())?;
-            Ok(Some(v))
-          }
-          cmd = self.receiver.recv() => {
-                    if let Some(cmd) = cmd {
-                        println!("receiving cmd from master, {:?}", cmd);
-                        self.stream.write_all(cmd.as_ref()).await?;
-                        self.stream.flush().await?;
-                        // handler.write_bytes(cmd.as_ref()).await.unwrap();
-                    }
-                    Ok(None)
-
-                }
-
+        let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
+        if bytes_read == 0 {
+            return Ok(None);
         }
+        let (v, _) = parse_message(self.buffer.split())?;
+        Ok(Some(v))
     }
 
     pub async fn read_bytes(&mut self) -> Result<Option<usize>> {

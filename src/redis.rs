@@ -1,9 +1,12 @@
-use bytes::Bytes;
+use anyhow::Result;
+use bytes::{Bytes, BytesMut};
 use rand::{distributions::Alphanumeric, Rng};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 use std::fmt::Display;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, ToSocketAddrs};
 
 use std::{
     collections::HashMap,
@@ -11,7 +14,6 @@ use std::{
 };
 
 use crate::command::SET;
-use crate::resp;
 
 #[derive(Debug, Clone)]
 pub enum RedisValue {
@@ -75,19 +77,42 @@ impl Redis {
         }
     }
 
-    pub async fn set(&mut self, key: String, value: RedisValue, expr: Option<Duration>) {
+    pub async fn set(
+        &mut self,
+        key: String,
+        value: RedisValue,
+        expr: Option<Duration>,
+    ) -> Result<()> {
+        // println!("set happens on {}", self.port);
         self.store.insert(
             key.clone(),
             (value.clone(), SystemTime::now() + expr.unwrap_or(self.expr)),
         );
         let set_command = SET::new(key.clone(), value.to_string(), expr).serialize();
+        // if self.slaves.len() > 0 {
+        //     let slave_address = "127.0.0.1:6380".to_socket_addrs()?.next().unwrap();
+        //     let mut stream = TcpStream::connect(slave_address).await?;
+        //     stream
+        //         .write(set_command.clone().serialize().as_bytes())
+        //         .await?;
+        // }
+
         // println!("{:?}", self.port);
-        // println!("{:?}", self.slaves);
+        // println!("{:?}", self.slaves.len());
         for slave in self.slaves.iter() {
-            print!("write to slave listening on port");
+            print!("write to slave listening on port ");
             println!("{}", slave.port);
-            slave.channel.send(Bytes::from(set_command.clone().serialize()));
+            // let slave_address = format!("{}:{}",self.master_host.unwrap(), 6380).to_socket_addrs()?.next().unwrap();
+            // let mut stream = TcpStream::connect(slave_address).await?;
+            // stream
+            //     .write(set_command.clone().serialize().as_bytes())
+            //     .await?;
+            // println!("{}", set_command.clone().serialize());
+            slave
+                .channel
+                .send(BytesMut::from(set_command.clone().serialize().as_bytes()))?;
         }
+        Ok(())
     }
 
     pub fn get(&mut self, key: String) -> Option<String> {
@@ -122,7 +147,7 @@ impl Redis {
         info.join("\n")
     }
 
-    pub fn add_slave(&mut self, r: Replica ) {
+    pub fn add_slave(&mut self, r: Replica) {
         if self.role != Role::Master {
             return;
         }
@@ -142,10 +167,10 @@ fn gen_id() -> String {
 #[derive(Debug)]
 pub struct Replica {
     pub port: String,
-    pub channel: mpsc::UnboundedSender<Bytes>,
+    pub channel: mpsc::UnboundedSender<BytesMut>,
 }
 impl Replica {
-    pub fn new(port: String, channel: mpsc::UnboundedSender<Bytes>) -> Self {
+    pub fn new(port: String, channel: mpsc::UnboundedSender<BytesMut>) -> Self {
         Self { port, channel }
     }
 }

@@ -70,7 +70,7 @@ async fn main() {
     }
 
     println!("Logs from your program will appear here!");
-    let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<BytesMut>();
 
     let redis = if role == Role::Master {
         redis::Redis::new(port)
@@ -115,13 +115,15 @@ async fn main() {
                 Value::BulkString("?".to_string()),
                 Value::BulkString("-1".to_string()),
             ]);
-            let mut handler = resp::RespHandler::new(stream, rx);
+            let mut handler = resp::RespHandler::new(stream);
             handler.write_value(ping).await.unwrap();
             handler.write_value(replconf1).await.unwrap();
             handler.write_value(replconf2).await.unwrap();
             handler.write_value(psync).await.unwrap();
-            let redis_clone = Arc::clone(&redis);
-            tokio::spawn(async move { handle_stream(handler.stream, redis_clone).await });
+            //let redis_clone = Arc::clone(&redis);
+            //tokio::spawn(async move { handle_stream(handler.stream, redis_clone).await });
+            while let Some(_) = handler.read_bytes().await.unwrap() {}
+            let _ = handler.stream.shutdown();
         } else {
             eprintln!("Could not connect to replication master");
         }
@@ -132,8 +134,11 @@ async fn main() {
         let stream = listener.accept().await;
 
         match stream {
-            Ok((mut _stream, _)) => {
-                println!("accepted new connection");
+            Ok((mut _stream, _addr)) => {
+                println!(
+                    "accepted new connection from port {}",
+                    _stream.peer_addr().unwrap().port()
+                );
                 //handle_stream(&mut _stream);
                 let redis_clone = Arc::clone(&redis);
                 tokio::spawn(async move { handle_stream(_stream, redis_clone).await });
@@ -175,25 +180,26 @@ async fn main() {
 // }
 
 async fn handle_stream(
-    mut stream: TcpStream,
+    stream: TcpStream,
     redis_clone: Arc<Mutex<redis::Redis>>,
     // slaves: Mutex<Vec<Replica>>,
-) {
+) -> Result<()> {
     //let mut handler = resp::RespHandler::new(stream);
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<BytesMut>();
 
-    let mut handler = resp::RespHandler::new(stream, rx);
+    let mut handler = resp::RespHandler::new(stream);
     loop {
         // let value = handler.read_value().await.unwrap();
         tokio::select! {
             value = handler.read_value() => {
-                let response = if let Ok(Some(v)) = value {
+                let response: Value = if let Ok(Some(v)) = value {
                 let (command, args) = extract_command(v.clone()).unwrap();
                 match command.to_lowercase().as_str() {
                     "ping" => Value::SimpleString("PONG".to_string()),
                     "echo" => args.first().unwrap().clone(),
                     "set" => {
+                        // println!("{:?}",args);
                         let key = unpack_bulk_str(args[0].clone()).unwrap();
                         let val = unpack_bulk_str(args[1].clone()).unwrap();
                         let expr = if args.len() >= 4 {
@@ -207,12 +213,17 @@ async fn handle_stream(
                             .lock()
                             .await
                             .set(key, redis::RedisValue::String(val), expr)
-                            .await;
-                        // for replica in slaves.lock().await.iter() {
-                        //     println!("Sending command to replicas");
-                        //     let _ = replica.channel.send(Bytes::from(v.to_owned().serialize()));
-                        // }
-                        Value::SimpleString("OK".to_string())
+                            .await.expect("writing db failed");
+
+                        // println!("{}",redis_clone.lock().await.master_port.unwrap_or(000));
+                        // println!("{}",handler.stream.peer_addr().unwrap().port());
+                        let res = if redis_clone.lock().await.master_port.unwrap_or(0) == handler.stream.peer_addr().unwrap().port() {
+                            Value::Empty
+                        } else {
+                            Value::SimpleString("OK".to_string())
+                        };
+
+                        res
                     }
                     "get" => {
                         let key = unpack_bulk_str(args[0].clone()).unwrap();
@@ -254,15 +265,15 @@ async fn handle_stream(
             handler.write_value(response).await.unwrap();
 
             }
-            // cmd = rx.recv() => {
-            //         if let Some(cmd) = cmd {
-            //             println!("receiving cmd from master, {:?}", cmd);
-            //             handler.stream.write_all(cmd.as_ref()).await.unwrap();
-            //             handler.stream.flush().await;
-            //             // handler.write_bytes(cmd.as_ref()).await.unwrap();
-            //         }
+            cmd = rx.recv() => {
+                    if let Some(cmd) = cmd {
+                        println!("receiving cmd from master, {:?}", cmd);
+                        handler.stream.write_all(cmd.as_ref()).await.unwrap();
+                        handler.stream.flush().await?;
+                        // handler.write_bytes(cmd.as_ref()).await.unwrap();
+                    }
 
-            //     }
+            }
         }
 
         // let response = if let Some(v) = value {
