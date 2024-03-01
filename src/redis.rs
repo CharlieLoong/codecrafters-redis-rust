@@ -1,5 +1,8 @@
+use bytes::Bytes;
 use rand::{distributions::Alphanumeric, Rng};
+use tokio::sync::mpsc;
 
+use std::fmt::Display;
 use std::net::Ipv4Addr;
 
 use std::{
@@ -7,10 +10,21 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-#[derive(Debug)]
+use crate::command::SET;
+use crate::resp;
+
+#[derive(Debug, Clone)]
 pub enum RedisValue {
     String(String),
 }
+impl Display for RedisValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            RedisValue::String(s) => write!(f, "{}", s),
+        }
+    }
+}
+
 #[derive(PartialEq, Clone, Copy)]
 pub enum Role {
     Master,
@@ -25,6 +39,7 @@ pub struct Redis {
     pub master_host: Option<Ipv4Addr>,
     pub master_port: Option<u16>,
     pub master_replid: Option<String>,
+    slaves: Vec<Replica>,
     master_repl_offset: u64,
 }
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);
@@ -40,6 +55,7 @@ impl Redis {
             master_port: None,
             master_replid: Some(gen_id()),
             master_repl_offset: 0,
+            slaves: Vec::new(),
         }
     }
 
@@ -55,12 +71,23 @@ impl Redis {
             master_port: Some(master_port),
             master_replid: None,
             master_repl_offset: 0,
+            slaves: Vec::new(),
         }
     }
 
-    pub fn set(&mut self, key: String, value: RedisValue, expr: Option<Duration>) {
-        self.store
-            .insert(key, (value, SystemTime::now() + expr.unwrap_or(self.expr)));
+    pub async fn set(&mut self, key: String, value: RedisValue, expr: Option<Duration>) {
+        self.store.insert(
+            key.clone(),
+            (value.clone(), SystemTime::now() + expr.unwrap_or(self.expr)),
+        );
+        let set_command = SET::new(key.clone(), value.to_string(), expr).serialize();
+        // println!("{:?}", self.port);
+        // println!("{:?}", self.slaves);
+        for slave in self.slaves.iter() {
+            print!("write to slave listening on port");
+            println!("{}", slave.port);
+            slave.channel.send(Bytes::from(set_command.clone().serialize()));
+        }
     }
 
     pub fn get(&mut self, key: String) -> Option<String> {
@@ -94,6 +121,13 @@ impl Redis {
         }
         info.join("\n")
     }
+
+    pub fn add_slave(&mut self, r: Replica ) {
+        if self.role != Role::Master {
+            return;
+        }
+        self.slaves.push(r);
+    }
 }
 
 fn gen_id() -> String {
@@ -103,4 +137,15 @@ fn gen_id() -> String {
         .collect();
 
     random_string
+}
+
+#[derive(Debug)]
+pub struct Replica {
+    pub port: String,
+    pub channel: mpsc::UnboundedSender<Bytes>,
+}
+impl Replica {
+    pub fn new(port: String, channel: mpsc::UnboundedSender<Bytes>) -> Self {
+        Self { port, channel }
+    }
 }

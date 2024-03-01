@@ -1,22 +1,26 @@
+#[allow(dead_code)]
 mod command;
 mod rdb;
 mod redis;
 mod resp;
 
 use std::{
-    env::args,
-    net::{Ipv4Addr, SocketAddrV4},
-    sync::{Arc, Mutex},
-    time::Duration,
+    env::args, net::{Ipv4Addr, SocketAddr, SocketAddrV4}, sync::Arc, time::Duration
 };
 
 use anyhow::{anyhow, Result};
+use bytes::Bytes;
 use rdb::empty_rdb;
+use redis::Replica;
 // use clap::Parser;
 use resp::Value;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    io::AsyncWriteExt, net::{TcpListener, TcpStream}, sync::{mpsc, Mutex}
+};
 
 use crate::redis::Role;
+
+
 
 /// Simple program to greet a person
 // #[derive(Parser, Debug)]
@@ -35,6 +39,8 @@ async fn main() {
     let mut master_host_ipv4 = None;
     let mut master_port = None;
     let mut is_slave = false;
+
+    // let mut slaves: Mutex<Vec<Replica>> = Mutex::new(vec![]);
 
     while let Some(arg) = args_iter.next() {
         match arg.to_lowercase().as_str() {
@@ -80,9 +86,10 @@ async fn main() {
         .await
         .expect("failed to bind");
     println!("listening on port {}", port);
+    // let master_socket = SocketAddrV4::new(master_host_ipv4.unwrap(), master_port.unwrap());
 
     if is_slave {
-        if let Ok(stream) = TcpStream::connect(SocketAddrV4::new(
+        if let Ok(mut stream) = TcpStream::connect(SocketAddrV4::new(
             master_host_ipv4.unwrap(),
             master_port.unwrap(),
         ))
@@ -104,16 +111,18 @@ async fn main() {
                 Value::BulkString("?".to_string()),
                 Value::BulkString("-1".to_string()),
             ]);
-            let mut handler = resp::RespHandler::new(stream);
+            let mut handler = resp::RespHandler::new(&mut stream);
             handler.write_value(ping).await.unwrap();
             handler.write_value(replconf1).await.unwrap();
             handler.write_value(replconf2).await.unwrap();
             handler.write_value(psync).await.unwrap();
-            while let Some(_) = handler.read_bytes().await.unwrap() {}
+            let redis_clone = Arc::clone(&redis);
+            tokio::spawn(async move { handle_stream(stream, redis_clone).await });
         } else {
             eprintln!("Could not connect to replication master");
         }
     }
+    println!("start serving");
 
     loop {
         let stream = listener.accept().await;
@@ -123,7 +132,7 @@ async fn main() {
                 println!("accepted new connection");
                 //handle_stream(&mut _stream);
                 let redis_clone = Arc::clone(&redis);
-                tokio::spawn(async move { handle_stream(_stream, redis_clone, is_slave).await });
+                tokio::spawn(async move { handle_stream(_stream, redis_clone).await });
             }
             Err(e) => {
                 eprintln!("error: {}", e);
@@ -132,73 +141,197 @@ async fn main() {
     }
 }
 
-async fn handle_stream(stream: TcpStream, redis_clone: Arc<Mutex<redis::Redis>>, _is_slave: bool) {
-    let mut handler = resp::RespHandler::new(stream);
+async fn _handshake_to_master(master_socket: SocketAddr, port: u16) {
+    if let Ok(mut stream) = TcpStream::connect(master_socket).await {
+        let ping = Value::Array(vec![Value::BulkString("PING".to_string())]);
+        let replconf1 = Value::Array(vec![
+            Value::BulkString("REPLCONF".to_string()),
+            Value::BulkString("listening-port".to_string()),
+            Value::BulkString(port.to_string()),
+        ]);
+        let replconf2 = Value::Array(vec![
+            Value::BulkString("REPLCONF".to_string()),
+            Value::BulkString("capa".to_string()),
+            Value::BulkString("psync2".to_string()),
+        ]);
+        let psync = Value::Array(vec![
+            Value::BulkString("PSYNC".to_string()),
+            Value::BulkString("?".to_string()),
+            Value::BulkString("-1".to_string()),
+        ]);
+        let mut handler = resp::RespHandler::new(&mut stream);
+        handler.write_value(ping).await.unwrap();
+        handler.write_value(replconf1).await.unwrap();
+        handler.write_value(replconf2).await.unwrap();
+        handler.write_value(psync).await.unwrap();
+        while let Some(_) = handler.read_bytes().await.unwrap() {}
+    } else {
+        eprintln!("Could not connect to replication master");
+    }
+}
+
+async fn handle_stream(
+    mut stream: TcpStream,
+    redis_clone: Arc<Mutex<redis::Redis>>,
+    // slaves: Mutex<Vec<Replica>>,
+) {
+    let mut handler = resp::RespHandler::new(&mut stream);
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
 
     loop {
-        let value = handler.read_value().await.unwrap();
+        // let value = handler.read_value().await.unwrap();
 
-        let response = if let Some(v) = value {
-            let (command, args) = extract_command(v).unwrap();
-            match command.to_lowercase().as_str() {
-                "ping" => Value::SimpleString("PONG".to_string()),
-                "echo" => args.first().unwrap().clone(),
-                "set" => {
-                    let key = unpack_bulk_str(args[0].clone()).unwrap();
-                    let value = unpack_bulk_str(args[1].clone()).unwrap();
-                    let expr = if args.len() >= 4 {
-                        Some(Duration::from_millis(
-                            unpack_bulk_str(args[3].clone()).unwrap().parse().unwrap(),
-                        ))
-                    } else {
-                        None
-                    };
-                    redis_clone
-                        .lock()
-                        .unwrap()
-                        .set(key, redis::RedisValue::String(value), expr);
-                    Value::SimpleString("OK".to_string())
-                }
-                "get" => {
-                    let key = unpack_bulk_str(args[0].clone()).unwrap();
-                    match redis_clone.lock().unwrap().get(key) {
-                        Some(val) => Value::BulkString(val),
-                        None => Value::BulkString("".to_string()),
+        tokio::select! {
+            value = handler.read_value() => {
+                let response = if let Ok(Some(v)) = value {
+                let (command, args) = extract_command(v.clone()).unwrap();
+                match command.to_lowercase().as_str() {
+                    "ping" => Value::SimpleString("PONG".to_string()),
+                    "echo" => args.first().unwrap().clone(),
+                    "set" => {
+                        let key = unpack_bulk_str(args[0].clone()).unwrap();
+                        let val = unpack_bulk_str(args[1].clone()).unwrap();
+                        let expr = if args.len() >= 4 {
+                            Some(Duration::from_millis(
+                                unpack_bulk_str(args[3].clone()).unwrap().parse().expect("invalid expr format"),
+                            ))
+                        } else {
+                            None
+                        };
+                        redis_clone
+                            .lock()
+                            .await
+                            .set(key, redis::RedisValue::String(val), expr)
+                            .await;
+                        // for replica in slaves.lock().await.iter() {
+                        //     println!("Sending command to replicas");
+                        //     let _ = replica.channel.send(Bytes::from(v.to_owned().serialize()));
+                        // }
+                        Value::SimpleString("OK".to_string())
                     }
-                }
-                "info" => Value::BulkString(redis_clone.lock().unwrap().info()),
-                "replconf" => Value::SimpleString("OK".to_string()),
-                "psync" => {
-                    //println!("{:?}", Value::File(empty_rdb()).serialize().as_bytes());
-                    // Value::Multiple(vec![
-                    //     Value::SimpleString(format!(
-                    //         "FULLRESYNC {} 0",
-                    //         redis_clone.lock().unwrap().master_replid.clone().unwrap()
-                    //     )),
-                    //     Value::File(empty_rdb()),
-                    // ])
-                    handler
-                        .write_value(Value::SimpleString(format!(
-                            "FULLRESYNC {} 0",
-                            redis_clone.lock().unwrap().master_replid.clone().unwrap()
-                        )))
-                        .await
-                        .unwrap();
-                    handler
-                        .write_bytes(format!("${}\r\n", empty_rdb().len()).as_bytes())
-                        .await
-                        .unwrap();
-                    handler.write_bytes(&empty_rdb()).await.unwrap();
+                    "get" => {
+                        let key = unpack_bulk_str(args[0].clone()).unwrap();
+                        match redis_clone.lock().await.get(key) {
+                            Some(val) => Value::BulkString(val),
+                            None => Value::BulkString("".to_string()),
+                        }
+                    }
+                    "info" => Value::BulkString(redis_clone.lock().await.info()),
+                    "replconf" => {
+                        if unpack_bulk_str(args[0].clone()).unwrap() == "listening-port" {
+                            // slaves.lock().await.push(Replica { port: args[1].clone().decode() , channel: tx.clone() });
+                            redis_clone.lock().await.add_slave(Replica { port: args[1].clone().decode() , channel: tx.clone() })
+                        }
+                        Value::SimpleString("OK".to_string())
+                    }
+                    "psync" => {
+                        handler
+                            .write_value(Value::SimpleString(format!(
+                                "FULLRESYNC {} 0",
+                                redis_clone.lock().await.master_replid.clone().unwrap()
+                            )))
+                            .await
+                            .unwrap();
+                        handler
+                            .write_bytes(format!("${}\r\n", empty_rdb().len()).as_bytes())
+                            .await
+                            .unwrap();
+                        handler.write_bytes(&empty_rdb()).await.unwrap();
 
-                    Value::Empty
-                }
+                        Value::Empty
+                    }
 
-                _ => panic!("Unknown command"),
+                    _ => panic!("Unknown command"),
+                }
+            } else {
+                Value::Empty
+            };
+            handler.write_value(response).await.unwrap();
+
             }
-        } else {
-            break;
-        };
-        handler.write_value(response).await.unwrap();
+            cmd = rx.recv() => {
+                    if let Some(cmd) = cmd {
+                        println!("Sending command to replicas, {:?}", cmd);
+                        stream.write_all(cmd.as_ref()).await.unwrap();
+                        handler.write_bytes(cmd.as_ref()).await.unwrap();
+                    }
+
+                }
+        }
+
+        // let response = if let Some(v) = value {
+        //     let (command, args) = extract_command(v.clone()).unwrap();
+        //     match command.to_lowercase().as_str() {
+        //         "ping" => Value::SimpleString("PONG".to_string()),
+        //         "echo" => args.first().unwrap().clone(),
+        //         "set" => {
+        //             let key = unpack_bulk_str(args[0].clone()).unwrap();
+        //             let val = unpack_bulk_str(args[1].clone()).unwrap();
+        //             let expr = if args.len() >= 4 {
+        //                 Some(Duration::from_millis(
+        //                     unpack_bulk_str(args[3].clone())
+        //                         .unwrap()
+        //                         .parse()
+        //                         .expect("invalid expr format"),
+        //                 ))
+        //             } else {
+        //                 None
+        //             };
+        //             redis_clone
+        //                 .lock()
+        //                 .await
+        //                 .set(key, redis::RedisValue::String(val), expr)
+        //                 .await;
+        //             for replica in slaves.iter() {
+        //                 let _ = replica.channel.send(Bytes::from(v.to_owned().serialize()));
+        //             }
+        //             Value::SimpleString("OK".to_string())
+        //         }
+        //         "get" => {
+        //             let key = unpack_bulk_str(args[0].clone()).unwrap();
+        //             match redis_clone.lock().await.get(key) {
+        //                 Some(val) => Value::BulkString(val),
+        //                 None => Value::BulkString("".to_string()),
+        //             }
+        //         }
+        //         "info" => Value::BulkString(redis_clone.lock().await.info()),
+        //         "replconf" => {
+        //             if unpack_bulk_str(args[0].clone()).unwrap() == "listening-port" {
+        //                 slaves.push(Replica {
+        //                     port: args[1].clone().decode(),
+        //                     channel: tx.clone(),
+        //                 });
+        //                 redis_clone.lock().await.add_slave(Replica {
+        //                     port: args[1].clone().decode(),
+        //                     channel: tx.clone(),
+        //                 })
+        //             }
+        //             Value::SimpleString("OK".to_string())
+        //         }
+        //         "psync" => {
+        //             handler
+        //                 .write_value(Value::SimpleString(format!(
+        //                     "FULLRESYNC {} 0",
+        //                     redis_clone.lock().await.master_replid.clone().unwrap()
+        //                 )))
+        //                 .await
+        //                 .unwrap();
+        //             handler
+        //                 .write_bytes(format!("${}\r\n", empty_rdb().len()).as_bytes())
+        //                 .await
+        //                 .unwrap();
+        //             handler.write_bytes(&empty_rdb()).await.unwrap();
+
+        //             Value::Empty
+        //         }
+
+        //         _ => panic!("Unknown command"),
+        //     }
+        // } else {
+        //     break;
+        // };
+        // handler.write_value(response).await.unwrap();
     }
 }
 
@@ -217,4 +350,8 @@ fn unpack_bulk_str(value: Value) -> Result<String> {
         Value::BulkString(s) => Ok(s),
         _ => Err(anyhow!("Expect bulk string")),
     }
+}
+
+fn _broadcast_to_replica() {
+    unimplemented!()
 }

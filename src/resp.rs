@@ -5,11 +5,11 @@ use tokio::net::TcpStream;
 
 use bytes::BytesMut;
 
-pub struct RespHandler {
-    stream: TcpStream,
+pub struct RespHandler<'a> {
+    stream: &'a mut TcpStream,
     buffer: BytesMut,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Value {
     SimpleString(String),
@@ -44,10 +44,17 @@ impl Value {
             _ => "".to_string(),
         }
     }
+    pub fn decode(self) -> String {
+        match self {
+            Value::BulkString(s) => s,
+            Value::SimpleString(s) => s,
+            _ => unimplemented!(),
+        }
+    }
 }
 
-impl RespHandler {
-    pub fn new(stream: TcpStream) -> Self {
+impl<'a> RespHandler<'a> {
+    pub fn new(stream: &'a mut TcpStream) -> Self {
         Self {
             stream,
             buffer: BytesMut::with_capacity(512),
