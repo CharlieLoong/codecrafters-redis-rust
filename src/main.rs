@@ -268,8 +268,7 @@ async fn handle_stream(
                             }
 
                             "wait" => {
-                                handler.write_bytes(&[0 as u8]).await.unwrap();
-                                Value::Empty
+                                Value::Integers(0)
                             }
 
                             _ => {

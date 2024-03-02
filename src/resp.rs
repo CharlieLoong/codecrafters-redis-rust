@@ -23,6 +23,7 @@ pub enum Value {
     Empty,
     Null,
     SYNC(String),
+    Integers(i64)
 }
 impl Value {
     pub fn serialize(&self) -> BytesMut {
@@ -54,6 +55,7 @@ impl Value {
             .concat()[..]
                 .into(),
             Value::Multiple(_) => todo!(),
+            Value::Integers(i) => format!(":{}\r\n", i).as_bytes().into(),
             _ => unimplemented!(),
         }
     }
@@ -170,11 +172,19 @@ fn read_until_crlf(buffer: &[u8]) -> Option<(&[u8], usize)> {
     None
 }
 
+fn parse_integer(buffer: BytesMut) -> Result<(Value, usize)> {
+    if let Some((line, len)) = read_until_crlf(&buffer[1..]) {
+        let integer = parse_int(line)?;
+
+        Ok(Value::Integers(integer))
+}
+
 fn parse_message(buffer: BytesMut) -> Result<(Value, usize)> {
     match buffer[0] as char {
         '+' => parse_simple_string(buffer),
         '$' => parse_bulk_string(buffer),
         '*' => parse_array(buffer),
+        ':' => parse_integer(buffer),
         _ => Err(anyhow!("Invalid first byte".to_string())),
     }
 }
