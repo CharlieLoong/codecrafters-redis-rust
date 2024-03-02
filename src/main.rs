@@ -250,6 +250,7 @@ async fn handle_stream(
                                 res
                             }
                             "psync" => {
+                                // TODO
                                 handler
                                     .write_value(Value::SimpleString(format!(
                                         "FULLRESYNC {} 0",
@@ -264,6 +265,11 @@ async fn handle_stream(
                                 handler.write_bytes(&empty_rdb()).await.unwrap();
                                 Value::Empty
                                 //Value::SYNC(redis_clone.lock().await.master_replid.clone().unwrap())
+                            }
+
+                            "wait" => {
+                                handler.write_bytes("0".as_bytes()).await.unwrap();
+                                Value::Empty
                             }
 
                             _ => {
