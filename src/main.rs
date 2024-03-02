@@ -181,7 +181,7 @@ async fn handle_stream(
                 if let Ok(Some(v)) = values {
                     println!("[receive values]: {:?}", v);
                     for value in v {
-                        let (command, args, len) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![], 0));
+                        let (command, args, mut len) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![], 0));
 
                         let response: Value = match command.to_lowercase().as_str() {
                             "ping" => {
@@ -272,6 +272,7 @@ async fn handle_stream(
                             }
 
                             "wait" => {
+                                len = 0;
                                 match offset {
                                     0 => Value::Integers(redis_clone.lock().await.slaves_count() as i64),
                                     _ => {
