@@ -6,9 +6,10 @@ mod resp;
 
 use std::{
     env::args,
+    future::Future,
     net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{anyhow, Result};
@@ -21,7 +22,10 @@ use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     sync::{mpsc, Mutex},
+    task::futures,
+    time::{sleep, Timeout},
 };
+use tokio_util::time::DelayQueue;
 
 use crate::redis::Role;
 
@@ -268,7 +272,20 @@ async fn handle_stream(
                             }
 
                             "wait" => {
-                                Value::Integers(redis_clone.lock().await.slaves_count() as i64)
+                                let wait_cnt = args[0].clone().decode().parse::<usize>().unwrap();
+                                let timeout = args[1].clone().decode().parse::<u64>().unwrap();
+                                let expr_time = SystemTime::now() + Duration::from_millis(timeout);
+                                let count = loop {
+                                    let cur_cnt = redis_clone.lock().await.check_processed();
+                                    if cur_cnt >= wait_cnt {
+                                        break cur_cnt;
+                                    }
+                                    if SystemTime::now() > expr_time {
+                                        break cur_cnt;
+                                    }
+                                };
+                                redis_clone.lock().await.reset_processed();
+                                Value::Integers(count as i64)
                             }
 
                             _ => {

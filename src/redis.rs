@@ -43,6 +43,7 @@ pub struct Redis {
     pub master_replid: Option<String>,
     slaves: Vec<Replica>,
     master_repl_offset: u64,
+    processed: usize,
 }
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);
 
@@ -58,6 +59,7 @@ impl Redis {
             master_replid: Some(gen_id()),
             master_repl_offset: 0,
             slaves: Vec::new(),
+            processed: 0,
         }
     }
 
@@ -74,6 +76,7 @@ impl Redis {
             master_replid: None,
             master_repl_offset: 0,
             slaves: Vec::new(),
+            processed: 0,
         }
     }
 
@@ -111,6 +114,7 @@ impl Redis {
             slave
                 .channel
                 .send(BytesMut::from(set_command.clone().serialize()))?;
+            self.processed += 1;
         }
         Ok(())
     }
@@ -161,6 +165,13 @@ impl Redis {
 
     pub fn slaves_count(&self) -> usize {
         self.slaves.len()
+    }
+
+    pub fn check_processed(&self) -> usize {
+        self.processed
+    }
+    pub fn reset_processed(&mut self) {
+        self.processed = 0;
     }
 }
 
