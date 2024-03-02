@@ -177,7 +177,8 @@ async fn handle_stream(
                 if let Ok(Some(v)) = values {
                     println!("[receive values]: {:?}", v);
                     for value in v {
-                        let (command, args) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![]));
+                        let (command, args, len) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![], 0));
+                        offset += len;
                         let response = match command.to_lowercase().as_str() {
                             "ping" => Value::SimpleString("PONG".to_string()),
                             "echo" => args.first().unwrap().clone(),
@@ -411,11 +412,13 @@ async fn _handle_stream_to_master(
     }
 }
 
-fn extract_command(value: Value) -> Result<(String, Vec<Value>)> {
+fn extract_command(value: Value) -> Result<(String, Vec<Value>, usize)> {
+    let len = value.serialize().len();
     match value {
         Value::Array(a) => Ok((
             unpack_bulk_str(a.first().unwrap().clone())?,
             a.into_iter().skip(1).collect(),
+            len,
         )),
         _ => Err(anyhow!("Invalid command format")),
     }
