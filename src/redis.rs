@@ -102,7 +102,7 @@ impl Redis {
         for slave in self.slaves.iter() {
             print!("write to slave listening on port ");
             println!("{}", slave.port);
-            // let slave_address = format!("{}:{}",self.master_host.unwrap(), 6380).to_socket_addrs()?.next().unwrap();
+            // let slave_address = format!("127.0.0.1:{}", 6380).to_socket_addrs()?.next().unwrap();
             // let mut stream = TcpStream::connect(slave_address).await?;
             // stream
             //     .write(set_command.clone().serialize().as_bytes())
@@ -168,9 +168,14 @@ fn gen_id() -> String {
 pub struct Replica {
     pub port: String,
     pub channel: mpsc::UnboundedSender<BytesMut>,
+    // pub stream: TcpStream,
 }
 impl Replica {
-    pub fn new(port: String, channel: mpsc::UnboundedSender<BytesMut>) -> Self {
-        Self { port, channel }
+    pub fn new(port: String, channel: mpsc::UnboundedSender<BytesMut>, /*stream: TcpStream*/) -> Self {
+        Self {
+            port,
+            channel,
+            // stream,
+        }
     }
 }
