@@ -13,7 +13,7 @@ pub struct RespHandler {
     // pub receiver: UnboundedReceiver<BytesMut>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     SimpleString(String),
     BulkString(String),
@@ -102,6 +102,9 @@ impl RespHandler {
     }
 
     pub async fn write_value(&mut self, value: Value) -> Result<()> {
+        if value == Value::Empty {
+            return Ok(());
+        }
         self.stream.write(value.serialize().as_bytes()).await?;
         Ok(())
     }
