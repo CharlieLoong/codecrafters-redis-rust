@@ -178,7 +178,7 @@ async fn handle_stream(
                     println!("[receive values]: {:?}", v);
                     for value in v {
                         let (command, args, len) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![], 0));
-                        offset += len;
+
                         let response = match command.to_lowercase().as_str() {
                             "ping" => Value::SimpleString("PONG".to_string()),
                             "echo" => args.first().unwrap().clone(),
@@ -266,6 +266,7 @@ async fn handle_stream(
                         };
                         //responses.push(response);
                         handler.write_value(response).await.unwrap();
+                        offset += len;
                     };
                     // for response in responses {
                     // }
@@ -287,7 +288,6 @@ async fn handle_stream(
         }
     }
 }
-
 
 fn extract_command(value: Value) -> Result<(String, Vec<Value>, usize)> {
     let len = value.serialize().len();
