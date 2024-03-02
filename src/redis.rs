@@ -1,13 +1,15 @@
+#[allow(dead_code)]
 use anyhow::Result;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use rand::{distributions::Alphanumeric, Rng};
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+
 use tokio::sync::mpsc;
+use tokio::time;
 
 use std::fmt::Display;
-use std::net::{Ipv4Addr, ToSocketAddrs};
+use std::net::Ipv4Addr;
 
+use std::thread::sleep;
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
@@ -110,12 +112,13 @@ impl Redis {
             // println!("{}", set_command.clone().serialize());
             slave
                 .channel
-                .send(BytesMut::from(set_command.clone().serialize().as_bytes()))?;
+                .send(BytesMut::from(set_command.clone().serialize()))?;
         }
         Ok(())
     }
 
-    pub fn get(&mut self, key: String) -> Option<String> {
+    pub async fn get(&mut self, key: String) -> Option<String> {
+        //sleep(time::Duration::from_millis(1000));
         match self.store.get(&key) {
             Some((RedisValue::String(value), expr)) => {
                 if *expr < SystemTime::now() {
@@ -174,7 +177,9 @@ pub struct Replica {
     pub channel: mpsc::UnboundedSender<BytesMut>,
     // pub stream: TcpStream,
 }
+#[allow(dead_code)]
 impl Replica {
+
     pub fn new(port: String, channel: mpsc::UnboundedSender<BytesMut>, /*stream: TcpStream*/) -> Self {
         Self {
             port,

@@ -1,11 +1,11 @@
+#[allow(dead_code, unused)]
 use anyhow::Result;
 use anyhow::{anyhow, Ok};
-#[allow(dead_code)]
-use bytes::BytesMut;
-use bytes::{BufMut, Bytes};
+use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::UnboundedReceiver;
+
+use crate::rdb::empty_rdb;
 
 pub struct RespHandler {
     pub stream: TcpStream,
@@ -22,34 +22,38 @@ pub enum Value {
     Multiple(Vec<Value>),
     Empty,
     Null,
+    SYNC(String),
 }
 impl Value {
-    pub fn serialize(self) -> String {
+    pub fn serialize(&self) -> BytesMut {
         match self {
-            Value::SimpleString(s) => format!("+{}\r\n", s),
+            Value::SimpleString(s) => format!("+{}\r\n", s).as_bytes().into(),
             Value::BulkString(s) => match s.len() {
-                0 => format!("$-1\r\n"),
-                _ => format!("${}\r\n{}\r\n", s.chars().count(), s),
+                0 => format!("$-1\r\n").as_bytes().into(),
+                _ => format!("${}\r\n{}\r\n", s.chars().count(), s)
+                    .as_bytes()
+                    .into(),
             },
             Value::Array(a) => {
-                let mut s = String::new();
-                for v in &a {
-                    s.push_str(&<Value as Clone>::clone(&v).serialize());
+                let mut s = vec![];
+                for v in a {
+                    s.push(v.serialize());
                 }
-                format!("*{}\r\n{}", a.len(), s)
+                format!("*{}\r\n{}", a.len(), String::from_utf8(s.concat()).unwrap())
+                    .as_bytes()
+                    .into()
             }
-            Value::File(f) => {
-                format!("${}\r\n{}", f.len(), hex::encode(&f))
-            }
-            Value::Multiple(mut values) => {
-                values.insert(0, Value::BulkString("Multiple".to_string()));
-                values
-                    .iter()
-                    .map(|v| <Value as Clone>::clone(&v).serialize())
-                    .collect()
-            }
-            Value::Null => format!("$-1\r\n"),
-            Value::Empty => "".to_owned(),
+            Value::File(f) => format!("${}\r\n{}", f.len(), hex::encode(&f))
+                .as_bytes()
+                .into(),
+            Value::Null => format!("$-1\r\n").as_bytes().into(),
+            Value::Empty => BytesMut::new(),
+            Value::SYNC(id) => [
+                Value::SimpleString(format!("FULLRESYNC {} 0", id)).serialize(),
+                format!("${}\r\n", empty_rdb().len()).as_bytes().into(),
+                BytesMut::from(&empty_rdb()[..]),
+            ].concat()[..].into(),
+            Value::Multiple(_) => todo!(),
             _ => unimplemented!(),
         }
     }
@@ -72,49 +76,56 @@ impl RespHandler {
         }
     }
 
-    pub async fn read_value(&mut self) -> Result<Option<Vec<Value>>> {
-        let bytes_read = if !self.buffer.is_empty() {
-            self.buffer.len()
-        } else {
-            self.stream.read_buf(&mut self.buffer).await?
-        };
+    pub async fn read_values(&mut self) -> Result<Option<Vec<Value>>> {
+        let mut bytes_read = self.stream.read_buf(&mut self.buffer).await?;
         if bytes_read == 0 {
             return Ok(None);
         }
-        let bytes = self.buffer.split();
-        let (v, consumed) = parse_message(bytes.clone())?;
-        //println!("consumed: {}, read: {}", consumed, bytes_read);
-        if bytes_read - consumed > 0 {
-            self.buffer.put(&bytes[consumed..]);
+        let mut bytes = self.buffer.split();
+        let mut values = vec![];
+        while bytes_read > 0 {
+            let (v, consumed) = parse_message(bytes.clone())?;
+            //println!("consumed: {}, read: {}", consumed, bytes_read);
+            values.push(v);
+            bytes.advance(consumed);
+            bytes_read -= consumed;
         }
-        // bytes_read -= consumed;
-        // if bytes_read == 0 {
-        //     return Ok(Some(v));
-        // }
-        // let mut vec = vec![v];
-        // while bytes_read > 0 {
-        //     let (v, consumed) = parse_message(self.buffer.split())?;
-        //     bytes_read -= consumed;
-        //     vec.push(v);
-        // }
-        // Ok(Some(Value::Multiple(vec)))
-        Ok(Some(v))
+        //println!("read finished");
+        Ok(Some(values))
     }
 
-    pub async fn read_bytes(&mut self) -> Result<Option<usize>> {
+    pub async fn read_bytes(&mut self) -> Result<Option<BytesMut>> {
         let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
         if bytes_read == 0 {
             return Ok(None);
         }
-        Ok(Some(bytes_read))
+        Ok(Some(self.buffer.clone()))
+    }
+
+    pub async fn read_file(&mut self) -> Result<Option<BytesMut>> {
+        let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
+        if bytes_read == 0 {
+            return Ok(None);
+        }
+        let (file_len, bytes_consumed) =
+            if let Some((line, len)) = read_until_crlf(&self.buffer[1..]) {
+                let file_len = parse_int(line)?;
+
+                (file_len, len + 1)
+            } else {
+                return Err(anyhow!("Invalid file format".to_string()));
+            };
+        Ok(Some(
+            self.buffer[bytes_consumed..bytes_consumed + file_len as usize].into(),
+        ))
     }
 
     pub async fn write_value(&mut self, value: Value) -> Result<()> {
-        if value.clone().serialize().as_bytes().len() == 0 {
+        if value.clone().serialize().len() == 0 {
             return Ok(());
         }
         println!("write: {:?}", value.clone().serialize());
-        self.stream.write(value.serialize().as_bytes()).await?;
+        self.stream.write(&value.serialize()).await?;
         Ok(())
     }
 
@@ -123,7 +134,7 @@ impl RespHandler {
         Ok(())
     }
 
-    async fn handshake(&mut self, port: u16) {
+    async fn _handshake(&mut self, port: u16) {
         let ping = Value::Array(vec![Value::BulkString("PING".to_string())]);
         let replconf1 = Value::Array(vec![
             Value::BulkString("REPLCONF".to_string()),
