@@ -125,8 +125,8 @@ async fn main() {
                 handler.write_value(replconf2).await.unwrap();
                 handler.read_values().await.unwrap(); // OK
                 handler.write_value(psync).await.unwrap();
-                let sync = handler.read_values().await; // FULLRSYNC
-                println!("FULLRESYNC_command: {:?}", sync);
+                // let sync = handler.read_values().await; // FULLRSYNC
+                // println!("FULLRESYNC_command: {:?}", sync);
                 //let rdb = handler.read_file().await.unwrap(); // rdb file
                 //println!("got rdb file: {:?}", String::from_utf8_lossy(&rdb.unwrap()));
                 handle_stream(handler.stream, redis_clone).await
