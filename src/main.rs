@@ -167,6 +167,7 @@ async fn handle_stream(
 
     let (tx, mut rx) = mpsc::unbounded_channel::<BytesMut>();
     let mut handler = resp::RespHandler::new(stream);
+    let mut offset = 0;
 
     loop {
         // let value = handler.read_value().await.unwrap();
@@ -230,7 +231,7 @@ async fn handle_stream(
                                         Value::Array(vec![
                                             Value::BulkString("REPLCONF".to_string()),
                                             Value::BulkString("ACK".to_string()),
-                                            Value::BulkString("0".to_string()),
+                                            Value::BulkString(offset.to_string()),
                                         ])
                                     } else {
                                         Value::Empty
@@ -277,6 +278,7 @@ async fn handle_stream(
                         println!("receiving cmd from master, {:?}", cmd);
                         handler.stream.write_all(cmd.as_ref()).await?;
                         handler.stream.flush().await?;
+                        offset += cmd.len();
                         // handler.write_bytes(cmd.as_ref()).await.unwrap();
                     }
 
