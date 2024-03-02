@@ -367,20 +367,20 @@ async fn handle_stream_to_master(
                                 res
                             }
                             "psync" => {
-                                handler
-                                    .write_value(Value::SimpleString(format!(
-                                        "FULLRESYNC {} 0",
-                                        redis_clone.lock().await.master_replid.clone().unwrap()
-                                    )))
-                                    .await
-                                    .unwrap();
-                                handler
-                                    .write_bytes(format!("${}\r\n", empty_rdb().len()).as_bytes())
-                                    .await
-                                    .unwrap();
-                                handler.write_bytes(&empty_rdb()).await.unwrap();
+                                // handler
+                                //     .write_value(Value::SimpleString(format!(
+                                //         "FULLRESYNC {} 0",
+                                //         redis_clone.lock().await.master_replid.clone().unwrap()
+                                //     )))
+                                //     .await
+                                //     .unwrap();
+                                // handler
+                                //     .write_bytes(format!("${}\r\n", empty_rdb().len()).as_bytes())
+                                //     .await
+                                //     .unwrap();
+                                // handler.write_bytes(&empty_rdb()).await.unwrap();
 
-                                Value::Empty
+                                Value::SYNC(redis_clone.lock().await.master_replid.clone().unwrap())
                             }
 
                             _ => Value::Empty,
