@@ -125,9 +125,10 @@ async fn main() {
                 handler.write_value(replconf2).await.unwrap();
                 handler.read_values().await.unwrap(); // OK
                 handler.write_value(psync).await.unwrap();
-                handler.read_values().await.unwrap(); // FULLRSYNC
-                let rdb = handler.read_file().await.unwrap(); // rdb file
-                println!("got rdb file: {:?}", String::from_utf8_lossy(&rdb.unwrap()));
+                let sync = handler.read_values().await; // FULLRSYNC
+                println!("FULLRESYNC_command: {:?}", sync);
+                //let rdb = handler.read_file().await.unwrap(); // rdb file
+                //println!("got rdb file: {:?}", String::from_utf8_lossy(&rdb.unwrap()));
                 handle_stream(handler.stream, redis_clone).await
             });
         } else {
@@ -158,7 +159,7 @@ async fn main() {
 }
 
 async fn handle_stream(
-    mut stream: TcpStream,
+    stream: TcpStream,
     redis_clone: Arc<Mutex<redis::Redis>>,
     // slaves: Mutex<Vec<Replica>>,
 ) -> Result<()> {
@@ -175,7 +176,7 @@ async fn handle_stream(
                 if let Ok(Some(v)) = values {
                     println!("[receive values]: {:?}", v);
                     for value in v {
-                        let (command, args) = extract_command(value.clone()).unwrap_or(("".to_owned(), vec![]));
+                        let (command, args) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![]));
                         let response = match command.to_lowercase().as_str() {
                             "ping" => Value::SimpleString("PONG".to_string()),
                             "echo" => args.first().unwrap().clone(),
@@ -257,7 +258,7 @@ async fn handle_stream(
                             }
 
                             _ => {
-                                println!("unknown command, {}", command);
+                                println!("unknown command, {} : {:?}", command, args);
                                 Value::Empty
                             },
                         };
@@ -284,8 +285,8 @@ async fn handle_stream(
     }
 }
 
-async fn handle_stream_to_master(
-    mut stream: TcpStream,
+async fn _handle_stream_to_master(
+    stream: TcpStream,
     redis_clone: Arc<Mutex<redis::Redis>>,
     // slaves: Mutex<Vec<Replica>>,
 ) -> Result<()> {
@@ -298,7 +299,7 @@ async fn handle_stream_to_master(
         // let value = handler.read_value().await.unwrap();
         tokio::select! {
             values = handler.read_values() => {
-                let mut responses = vec![];
+                //let mut responses = vec![];
                 if let Ok(Some(v)) = values {
                     println!("values: {:?}", v);
                     for value in v {
@@ -385,11 +386,11 @@ async fn handle_stream_to_master(
 
                             _ => Value::Empty,
                         };
-                        responses.push(response);
-                    };
-                    for response in responses {
                         handler.write_value(response).await.unwrap();
-                    }
+                        //responses.push(response);
+                    };
+                    // for response in responses {
+                    // }
                     println!("response finished");
             };
 

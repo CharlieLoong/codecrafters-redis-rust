@@ -1,6 +1,6 @@
+use anyhow::anyhow;
 #[allow(dead_code, unused)]
 use anyhow::Result;
-use anyhow::{anyhow, Ok};
 use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -43,16 +43,16 @@ impl Value {
                     .as_bytes()
                     .into()
             }
-            Value::File(f) => format!("${}\r\n{}", f.len(), hex::encode(&f))
-                .as_bytes()
-                .into(),
+            Value::File(f) => [format!("${}\r\n", f.len()).as_bytes(), f].concat()[..].into(),
             Value::Null => format!("$-1\r\n").as_bytes().into(),
             Value::Empty => BytesMut::new(),
             Value::SYNC(id) => [
                 Value::SimpleString(format!("FULLRESYNC {} 0", id)).serialize(),
                 format!("${}\r\n", empty_rdb().len()).as_bytes().into(),
                 BytesMut::from(&empty_rdb()[..]),
-            ].concat()[..].into(),
+            ]
+            .concat()[..]
+                .into(),
             Value::Multiple(_) => todo!(),
             _ => unimplemented!(),
         }
@@ -182,6 +182,16 @@ fn parse_message(buffer: BytesMut) -> Result<(Value, usize)> {
 fn parse_simple_string(buffer: BytesMut) -> Result<(Value, usize)> {
     if let Some((line, len)) = read_until_crlf(&buffer[1..]) {
         let string = String::from_utf8(line.to_vec()).unwrap();
+        //println!("string: {}", string);
+        // if string.starts_with("FULLRESYNC") {
+        //     let args: Vec<_> = string.split(' ').collect();
+        //     let id = args[1];
+        //     if let Ok((_file, file_len)) = parse_file(buffer.split_off(len)) {
+        //         return Ok((Value::SYNC(id.to_owned()), file_len + 1));
+        //     } else {
+        //         return Err(anyhow!("parse file failed".to_string()));
+        //     }
+        // }
         return Ok((Value::SimpleString(string), len + 1));
     }
     Err(anyhow!("Invalid string".to_string()))
@@ -217,15 +227,38 @@ fn parse_bulk_string(buffer: BytesMut) -> Result<(Value, usize)> {
         return Ok((Value::Null, bytes_consumed + 2));
     }
     let end_of_bulk_str = bytes_consumed + bulk_str_len as usize;
-    let total_parsed = end_of_bulk_str + 2;
-    Ok((
-        Value::BulkString(String::from_utf8(
-            buffer[bytes_consumed..end_of_bulk_str].to_vec(),
-        )?),
-        total_parsed,
-    ))
+    //println!("{:?}", &buffer[end_of_bulk_str..end_of_bulk_str + 2]);
+    if buffer.len() >= end_of_bulk_str + 2 && &buffer[end_of_bulk_str..end_of_bulk_str + 2] == b"\r\n" {
+        Ok((
+            Value::BulkString(String::from_utf8(
+                buffer[bytes_consumed..end_of_bulk_str].to_vec(),
+            )?),
+            end_of_bulk_str + 2,
+        ))
+    } else {
+        Ok((
+            Value::File(buffer[bytes_consumed..end_of_bulk_str].to_vec()),
+            end_of_bulk_str,
+        ))
+    }
 }
 
 fn parse_int(buffer: &[u8]) -> Result<i64> {
     Ok(String::from_utf8(buffer.to_vec())?.parse::<i64>()?)
+}
+
+pub fn _parse_file(buffer: BytesMut) -> Result<(BytesMut, usize)> {
+    println!("parse file: {:?}", String::from_utf8_lossy(&buffer));
+    let (file_len, bytes_consumed) = if let Some((line, len)) = read_until_crlf(&buffer[1..]) {
+        let file_len = parse_int(line)?;
+
+        (file_len, len + 1)
+    } else {
+        return Err(anyhow!("Invalid file format".to_string()));
+    };
+
+    Ok((
+        buffer[bytes_consumed..bytes_consumed + file_len as usize].into(),
+        file_len as usize,
+    ))
 }

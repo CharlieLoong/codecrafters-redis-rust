@@ -4,12 +4,10 @@ use bytes::BytesMut;
 use rand::{distributions::Alphanumeric, Rng};
 
 use tokio::sync::mpsc;
-use tokio::time;
 
 use std::fmt::Display;
 use std::net::Ipv4Addr;
 
-use std::thread::sleep;
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
@@ -179,8 +177,10 @@ pub struct Replica {
 }
 #[allow(dead_code)]
 impl Replica {
-
-    pub fn new(port: String, channel: mpsc::UnboundedSender<BytesMut>, /*stream: TcpStream*/) -> Self {
+    pub fn new(
+        port: String,
+        channel: mpsc::UnboundedSender<BytesMut>, /*stream: TcpStream*/
+    ) -> Self {
         Self {
             port,
             channel,
