@@ -21,6 +21,7 @@ pub enum Value {
     File(Vec<u8>),
     Multiple(Vec<Value>),
     Empty,
+    Null,
 }
 impl Value {
     pub fn serialize(self) -> String {
@@ -47,13 +48,16 @@ impl Value {
                     .map(|v| <Value as Clone>::clone(&v).serialize())
                     .collect()
             }
-            _ => "".to_string(),
+            Value::Null => format!("$-1\r\n"),
+            Value::Empty => "".to_owned(),
+            _ => unimplemented!(),
         }
     }
     pub fn decode(self) -> String {
         match self {
             Value::BulkString(s) => s,
             Value::SimpleString(s) => s,
+            Value::Null => "nil".to_owned(),
             _ => unimplemented!(),
         }
     }
@@ -68,14 +72,18 @@ impl RespHandler {
         }
     }
 
-    pub async fn read_value(&mut self) -> Result<Option<Value>> {
-        let bytes_read = if !self.buffer.is_empty() { self.buffer.len() } else { self.stream.read_buf(&mut self.buffer).await? };
+    pub async fn read_value(&mut self) -> Result<Option<Vec<Value>>> {
+        let bytes_read = if !self.buffer.is_empty() {
+            self.buffer.len()
+        } else {
+            self.stream.read_buf(&mut self.buffer).await?
+        };
         if bytes_read == 0 {
             return Ok(None);
         }
         let bytes = self.buffer.split();
         let (v, consumed) = parse_message(bytes.clone())?;
-        println!("consumed: {}, read: {}", consumed, bytes_read);
+        //println!("consumed: {}, read: {}", consumed, bytes_read);
         if bytes_read - consumed > 0 {
             self.buffer.put(&bytes[consumed..]);
         }
@@ -105,6 +113,7 @@ impl RespHandler {
         if value.clone().serialize().as_bytes().len() == 0 {
             return Ok(());
         }
+        println!("write: {:?}", value.clone().serialize());
         self.stream.write(value.serialize().as_bytes()).await?;
         Ok(())
     }
@@ -193,9 +202,11 @@ fn parse_bulk_string(buffer: BytesMut) -> Result<(Value, usize)> {
     } else {
         return Err(anyhow!("Invalid array format".to_string()));
     };
+    if bulk_str_len < 0 {
+        return Ok((Value::Null, bytes_consumed + 2));
+    }
     let end_of_bulk_str = bytes_consumed + bulk_str_len as usize;
     let total_parsed = end_of_bulk_str + 2;
-
     Ok((
         Value::BulkString(String::from_utf8(
             buffer[bytes_consumed..end_of_bulk_str].to_vec(),

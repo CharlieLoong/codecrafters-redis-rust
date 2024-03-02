@@ -153,6 +153,10 @@ impl Redis {
         }
         self.slaves.push(r);
     }
+
+    pub fn is_slave(&self) -> bool {
+        self.role == Role::Slave
+    }
 }
 
 fn gen_id() -> String {

@@ -6,7 +6,7 @@ mod resp;
 
 use std::{
     env::args,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
     time::Duration,
 };
@@ -22,8 +22,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, Mutex},
 };
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
-
 
 use crate::redis::Role;
 
@@ -204,7 +202,6 @@ async fn handle_stream(
                     "ping" => Value::SimpleString("PONG".to_string()),
                     "echo" => args.first().unwrap().clone(),
                     "set" => {
-                        println!("{:?}",args);
                         let key = unpack_bulk_str(args[0].clone()).unwrap();
                         let val = unpack_bulk_str(args[1].clone()).unwrap();
                         let expr = if args.len() >= 4 {
@@ -232,19 +229,37 @@ async fn handle_stream(
                     }
                     "get" => {
                         let key = unpack_bulk_str(args[0].clone()).unwrap();
-                        match redis_clone.lock().await.get(key) {
+                        let res = match redis_clone.lock().await.get(key) {
                             Some(val) => Value::BulkString(val),
-                            None => Value::BulkString("".to_string()),
-                        }
+                            None => Value::Null,
+                        };
+                        println!("get-response: {:?}", res.clone().decode());
+                        res
                     }
                     "info" => Value::BulkString(redis_clone.lock().await.info()),
                     "replconf" => {
-                        if unpack_bulk_str(args[0].clone()).unwrap() == "listening-port" {
+                        let res = match args[0].clone().decode().to_lowercase().as_str() {
+                         "listening-port" => {
                             // slaves.lock().await.push(Replica { port: args[1].clone().decode() , channel: tx.clone() });
                             // let framed = Framed::new(handler.stream, LengthDelimitedCodec::new());
-                            redis_clone.lock().await.add_slave(Replica { port: args[1].clone().decode() , channel: tx.clone() })
+                            redis_clone.lock().await.add_slave(Replica { port: args[1].clone().decode() , channel: tx.clone() });
+                            Value::SimpleString("OK".to_string())
+
                         }
-                        Value::SimpleString("OK".to_string())
+                        "getack" => {
+                            if redis_clone.lock().await.is_slave() {
+                                Value::Array(vec![
+                                    Value::BulkString("REPLCONF".to_string()),
+                                    Value::BulkString("ACK".to_string()),
+                                    Value::BulkString("0".to_string()),
+                                ])
+                            } else {
+                                Value::Empty
+                            }
+                        }
+                        _ => unimplemented!()
+                    };
+                        res
                     }
                     "psync" => {
                         handler
@@ -274,7 +289,7 @@ async fn handle_stream(
             cmd = rx.recv() => {
                     if let Some(cmd) = cmd {
                         println!("receiving cmd from master, {:?}", cmd);
-                        handler.stream.write_all(cmd.as_ref()).await.unwrap();
+                        handler.stream.write_all(cmd.as_ref()).await?;
                         handler.stream.flush().await?;
                         // handler.write_bytes(cmd.as_ref()).await.unwrap();
                     }
