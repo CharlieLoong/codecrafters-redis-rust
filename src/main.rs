@@ -183,7 +183,7 @@ async fn handle_stream(
                     for value in v {
                         let (command, args, len) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![], 0));
 
-                        let response = match command.to_lowercase().as_str() {
+                        let response: Value = match command.to_lowercase().as_str() {
                             "ping" => {
                                 let res = if redis_clone.lock().await.is_slave() {
                                     Value::Empty
@@ -272,20 +272,26 @@ async fn handle_stream(
                             }
 
                             "wait" => {
-                                let wait_cnt = args[0].clone().decode().parse::<usize>().unwrap();
-                                let timeout = args[1].clone().decode().parse::<u64>().unwrap();
-                                let expr_time = SystemTime::now() + Duration::from_millis(timeout);
-                                let count = loop {
-                                    let cur_cnt = redis_clone.lock().await.check_processed();
-                                    if cur_cnt >= wait_cnt {
-                                        break cur_cnt;
+                                match offset {
+                                    0 => Value::Integers(redis_clone.lock().await.slaves_count() as i64),
+                                    _ => {
+                                        let wait_cnt = args[0].clone().decode().parse::<usize>().unwrap();
+                                        let timeout = args[1].clone().decode().parse::<u64>().unwrap();
+                                        let expr_time = SystemTime::now() + Duration::from_millis(timeout);
+                                        let count = loop {
+                                            let cur_cnt = redis_clone.lock().await.check_processed();
+                                            if cur_cnt >= wait_cnt {
+                                                break cur_cnt;
+                                            }
+                                            if SystemTime::now() > expr_time {
+                                                break cur_cnt;
+                                            }
+                                        };
+                                        redis_clone.lock().await.reset_processed();
+                                        Value::Integers(count as i64)
                                     }
-                                    if SystemTime::now() > expr_time {
-                                        break cur_cnt;
-                                    }
-                                };
-                                redis_clone.lock().await.reset_processed();
-                                Value::Integers(count as i64)
+                                }
+
                             }
 
                             _ => {
