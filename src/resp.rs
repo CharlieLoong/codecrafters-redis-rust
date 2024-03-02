@@ -23,7 +23,7 @@ pub enum Value {
     Empty,
     Null,
     SYNC(String),
-    Integers(i64)
+    Integers(i64),
 }
 impl Value {
     pub fn serialize(&self) -> BytesMut {
@@ -175,10 +175,10 @@ fn read_until_crlf(buffer: &[u8]) -> Option<(&[u8], usize)> {
 fn parse_integer(buffer: BytesMut) -> Result<(Value, usize)> {
     if let Some((line, len)) = read_until_crlf(&buffer[1..]) {
         let integer = parse_int(line)?;
-
-        Ok(Value::Integers(integer))
+        return Ok((Value::Integers(integer), len + 1));
+    }
+    Err(anyhow!("Invalid integer format".to_string()))
 }
-
 fn parse_message(buffer: BytesMut) -> Result<(Value, usize)> {
     match buffer[0] as char {
         '+' => parse_simple_string(buffer),
@@ -238,7 +238,9 @@ fn parse_bulk_string(buffer: BytesMut) -> Result<(Value, usize)> {
     }
     let end_of_bulk_str = bytes_consumed + bulk_str_len as usize;
     //println!("{:?}", &buffer[end_of_bulk_str..end_of_bulk_str + 2]);
-    if buffer.len() >= end_of_bulk_str + 2 && &buffer[end_of_bulk_str..end_of_bulk_str + 2] == b"\r\n" {
+    if buffer.len() >= end_of_bulk_str + 2
+        && &buffer[end_of_bulk_str..end_of_bulk_str + 2] == b"\r\n"
+    {
         Ok((
             Value::BulkString(String::from_utf8(
                 buffer[bytes_consumed..end_of_bulk_str].to_vec(),
