@@ -102,7 +102,7 @@ impl RespHandler {
     }
 
     pub async fn write_value(&mut self, value: Value) -> Result<()> {
-        if value == Value::Empty {
+        if value.clone().serialize().as_bytes().len() == 0 {
             return Ok(());
         }
         self.stream.write(value.serialize().as_bytes()).await?;
