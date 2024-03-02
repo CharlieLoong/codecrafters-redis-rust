@@ -268,7 +268,7 @@ async fn handle_stream(
                             }
 
                             "wait" => {
-                                Value::Integers(0)
+                                Value::Integers(redis_clone.lock().await.slaves_count() as i64)
                             }
 
                             _ => {

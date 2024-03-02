@@ -158,6 +158,10 @@ impl Redis {
     pub fn is_slave(&self) -> bool {
         self.role == Role::Slave
     }
+
+    pub fn slaves_count(&self) -> usize {
+        self.slaves.len()
+    }
 }
 
 fn gen_id() -> String {
