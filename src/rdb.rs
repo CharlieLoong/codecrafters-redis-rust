@@ -5,7 +5,7 @@ use std::{
     fs::File,
     io::Read,
     path::Path,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::redis::{Item, RedisValue};
@@ -43,8 +43,22 @@ impl RdbReader {
         if s[index] == 0xFF {
             return None;
         }
+
         let mut index = index + 1;
+        let mut expiry = SystemTime::now() + Duration::from_secs(60);
+        if s[index] == 0xFD {
+            let timestamp: u32 = u32::from_le_bytes(s[index+1..index+5].try_into().unwrap());
+            expiry = UNIX_EPOCH + Duration::from_secs(timestamp as u64);
+            index += 5;
+        } else if s[index] == 0xFC {
+            let timestamp: u32 = u32::from_le_bytes(s[index+1..index+5].try_into().unwrap());
+            expiry = UNIX_EPOCH + Duration::from_millis(timestamp as u64);
+            index += 5;
+        }
+
+        index += 1; // TYPE
         let key;
+        // parse key
         if let Some((nindex, length)) = self.parse_length_encoding(s, index) {
             println!("Reading from {} to {}", nindex, nindex + length);
             key = String::from_utf8(s[nindex..nindex + length].to_vec()).unwrap();
@@ -53,6 +67,7 @@ impl RdbReader {
         } else {
             return None;
         }
+        //parse value
         if let Some((nindex, length)) = self.parse_length_encoding(s, index) {
             println!("Reading from {} to {}", nindex, nindex + length);
             let value = String::from_utf8(s[nindex..nindex + length].to_vec()).unwrap();
@@ -61,7 +76,7 @@ impl RdbReader {
                 key,
                 Item {
                     value: RedisValue::String(value),
-                    expire: SystemTime::now() + Duration::from_secs(60)
+                    expire: expiry
                 },
             );
             Some(nindex + length)
