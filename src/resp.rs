@@ -1,9 +1,12 @@
+use std::time::Duration;
+
 use anyhow::anyhow;
 #[allow(dead_code, unused)]
 use anyhow::Result;
 use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::sleep;
 
 use crate::rdb::empty_rdb;
 
@@ -136,7 +139,7 @@ impl RespHandler {
         Ok(())
     }
 
-    async fn _handshake(&mut self, port: u16) {
+    pub async fn _handshake(&mut self, port: u16) {
         let ping = Value::Array(vec![Value::BulkString("PING".to_string())]);
         let replconf1 = Value::Array(vec![
             Value::BulkString("REPLCONF".to_string()),
@@ -155,6 +158,7 @@ impl RespHandler {
         ]);
         self.write_value(ping).await.unwrap();
         self.write_value(replconf1).await.unwrap();
+        //sleep(Duration::from_millis(2500)).await;
         self.write_value(replconf2).await.unwrap();
         self.write_value(psync).await.unwrap();
     }

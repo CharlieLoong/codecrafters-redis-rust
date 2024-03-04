@@ -4,6 +4,7 @@ use bytes::BytesMut;
 use rand::{distributions::Alphanumeric, Rng};
 
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 
 use std::fmt::Display;
 use std::net::Ipv4Addr;
@@ -41,9 +42,10 @@ pub struct Redis {
     pub master_host: Option<Ipv4Addr>,
     pub master_port: Option<u16>,
     pub master_replid: Option<String>,
-    slaves: Vec<Replica>,
+    pub slaves: Vec<Replica>,
     master_repl_offset: u64,
-    processed: usize,
+    pub processed: usize,
+    pub offset: usize,
 }
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);
 
@@ -60,6 +62,7 @@ impl Redis {
             master_repl_offset: 0,
             slaves: Vec::new(),
             processed: 0,
+            offset: 0,
         }
     }
 
@@ -77,6 +80,7 @@ impl Redis {
             master_repl_offset: 0,
             slaves: Vec::new(),
             processed: 0,
+            offset: 0,
         }
     }
 
@@ -102,7 +106,7 @@ impl Redis {
 
         // println!("{:?}", self.port);
         // println!("{:?}", self.slaves.len());
-        for slave in self.slaves.iter() {
+        for slave in &self.slaves {
             print!("write to slave listening on port ");
             println!("{}", slave.port);
             // let slave_address = format!("127.0.0.1:{}", 6380).to_socket_addrs()?.next().unwrap();
@@ -111,16 +115,15 @@ impl Redis {
             //     .write(set_command.clone().serialize().as_bytes())
             //     .await?;
             // println!("{}", set_command.clone().serialize());
-            slave
+            let _ = slave
                 .channel
-                .send(BytesMut::from(set_command.clone().serialize()))?;
-            self.processed += 1;
+                .send(BytesMut::from(set_command.clone().serialize()));
         }
         Ok(())
     }
 
     pub async fn get(&mut self, key: String) -> Option<String> {
-        //sleep(time::Duration::from_millis(1000));
+        sleep(Duration::from_millis(10)).await;
         match self.store.get(&key) {
             Some((RedisValue::String(value), expr)) => {
                 if *expr < SystemTime::now() {
@@ -143,10 +146,11 @@ impl Redis {
                     "master_replid:{}",
                     self.master_replid.clone().unwrap()
                 ));
-                info.push(format!("master_repl_offset:{}", self.master_repl_offset));
+                info.push(format!("master_repl_offset:{}", self.offset));
             }
             Role::Slave => {
                 info.push(format!("role:slave"));
+                info.push(format!("offset:{}", self.offset));
             }
         }
         info.join("\n")
@@ -188,6 +192,7 @@ fn gen_id() -> String {
 pub struct Replica {
     pub port: String,
     pub channel: mpsc::UnboundedSender<BytesMut>,
+    pub offset: usize,
     // pub stream: TcpStream,
 }
 #[allow(dead_code)]
@@ -199,6 +204,7 @@ impl Replica {
         Self {
             port,
             channel,
+            offset: 0,
             // stream,
         }
     }
