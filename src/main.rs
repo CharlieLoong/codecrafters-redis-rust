@@ -219,7 +219,7 @@ async fn handle_stream(
 
                                 // println!("{}",redis_clone.lock().await.master_port.unwrap_or(000));
                                 // println!("{}",handler.stream.peer_addr().unwrap().port());
-                                let res = if redis_clone.lock().await.is_slave() {
+                                let res = if shared_state.read().await.is_slave() {
                                     // Value::Array(vec![
                                     //     Value::BulkString("REPLCONF".to_string()),
                                     //     Value::BulkString("ACK".to_string()),
@@ -242,6 +242,7 @@ async fn handle_stream(
                                 res
                             }
                             "info" => {
+                                // todo
                                 len = 0;
                                 Value::BulkString(redis_clone.lock().await.info())
                             },
@@ -251,15 +252,15 @@ async fn handle_stream(
                                         // slaves.lock().await.push(Replica { port: args[1].clone().decode() , channel: tx.clone() });
                                         // let framed = Framed::new(handler.stream, LengthDelimitedCodec::new());
                                         redis_clone.lock().await.add_slave(Replica { port: args[1].clone().decode() , channel: tx.clone(), offset: 0 });
-                                        //shared_state.write().await.add_slave(Replica { port: args[1].clone().decode() , channel: tx.clone(), offset: 0 });
+                                        shared_state.write().await.add_slave(Replica { port: args[1].clone().decode() , channel: tx.clone(), offset: 0 });
                                         Value::SimpleString("OK".to_string())
                                     }
                                     "getack" => {
-                                        if redis_clone.lock().await.is_slave() {
+                                        if shared_state.read().await.is_slave() {
                                             Value::Array(vec![
                                                 Value::BulkString("REPLCONF".to_string()),
                                                 Value::BulkString("ACK".to_string()),
-                                                Value::BulkString(redis_clone.lock().await.offset.to_string()),
+                                                Value::BulkString(shared_state.read().await.offset.to_string()),
                                             ])
                                         } else {
                                             Value::Empty
@@ -268,9 +269,9 @@ async fn handle_stream(
                                     "ack" => {
                                         len = 0;
                                         let slave_offset: usize = args[1].clone().decode().parse().unwrap();
-                                        println!("slave offset: {}, master offset: {}", slave_offset, redis_clone.lock().await.offset);
-                                        if slave_offset >= redis_clone.lock().await.offset {
-                                            redis_clone.lock().await.processed += 1;
+                                        println!("slave offset: {}, master offset: {}", slave_offset, shared_state.read().await.offset);
+                                        if slave_offset >= shared_state.read().await.offset {
+                                            shared_state.write().await.processed += 1;
                                         }
 
                                         Value::Empty
@@ -281,14 +282,14 @@ async fn handle_stream(
                             }
                             "psync" => {
                                 // TODO
-                                let mut lock = redis_clone.lock().await;
+                                let lock = redis_clone.lock().await;
                                 len = 0;
-                                lock.offset = 0;
+                                shared_state.write().await.offset = 0;
                                 handler
                                     .write_value(Value::SimpleString(format!(
                                         "FULLRESYNC {} {}",
                                         lock.master_replid.clone().unwrap(),
-                                        lock.offset
+                                        shared_state.read().await.offset
                                     )))
                                     .await
                                     .unwrap();
@@ -307,7 +308,7 @@ async fn handle_stream(
                                 len = 0;
                                 let wait_cnt = args[0].clone().decode().parse::<usize>().unwrap();
                                 let timeout = args[1].clone().decode().parse::<u64>().unwrap();
-                                let cnt = handle_wait(wait_cnt, timeout, redis_clone.clone()).await;
+                                let cnt = handle_wait(wait_cnt, timeout, redis_clone.clone(), shared_state.clone()).await;
 
                                 Value::Integers(cnt as i64)
 
@@ -315,7 +316,7 @@ async fn handle_stream(
 
                             "fullresync" => {
                                 let sync_offset = args[1].clone().decode().parse::<usize>().unwrap();
-                                redis_clone.lock().await.offset = sync_offset;
+                                shared_state.write().await.offset = sync_offset;
                                 Value::Empty
                             }
 
@@ -327,7 +328,7 @@ async fn handle_stream(
                         //responses.push(response);
                         handler.write_value(response).await.unwrap();
 
-                        redis_clone.lock().await.offset += len;
+                        shared_state.write().await.offset += len;
                         // redis_clone.lock().await.offset += len;
                     };
             };
@@ -382,9 +383,13 @@ async fn handle_wait(
     wait_cnt: usize,
     timeout: u64,
     redis_clone: Arc<Mutex<redis::Redis>>,
+    shared_state: Arc<RwLock<State>>,
 ) -> usize {
-    redis_clone.lock().await.processed = 0;
-    for slave in &redis_clone.lock().await.slaves {
+    if shared_state.read().await.offset == 0 {
+        return shared_state.read().await.slaves.len();
+    }
+    shared_state.write().await.processed = 0;
+    for slave in &shared_state.read().await.slaves {
         let _ = slave.channel.send(
             Value::Array(vec![
                 Value::BulkString("REPLCONF".to_string()),
@@ -394,9 +399,10 @@ async fn handle_wait(
             .serialize(),
         );
     }
+    println!("master offset: {}", shared_state.read().await.offset);
     let expr_time = SystemTime::now() + Duration::from_millis(timeout);
     loop {
-        let cur_cnt = redis_clone.lock().await.check_processed();
+        let cur_cnt = shared_state.read().await.processed;
         if cur_cnt >= wait_cnt {
             break cur_cnt;
         }
@@ -411,6 +417,7 @@ pub struct State {
     pub slaves: Vec<Replica>,
     pub offset: usize,
     pub port: u16,
+    pub processed: usize,
 }
 
 impl State {
@@ -420,10 +427,15 @@ impl State {
             slaves: Vec::new(),
             offset: 0,
             port,
+            processed: 0,
         }
     }
 
     pub fn add_slave(&mut self, r: Replica) {
         self.slaves.push(r);
+    }
+
+    pub fn is_slave(&self) -> bool {
+        self.role == Role::Slave
     }
 }
