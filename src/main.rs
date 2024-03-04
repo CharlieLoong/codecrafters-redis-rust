@@ -327,6 +327,25 @@ async fn handle_stream(
                                 shared_state.write().await.offset = sync_offset;
                                 Value::Empty
                             }
+                            "config" => {
+                                let response = match args[0].clone().decode().to_lowercase().as_str() {
+                                    "get" => {
+                                        match args[1].clone().decode().to_lowercase().as_str() {
+                                            "dir" => {
+                                                Value::BulkString(shared_state.read().await.dir.clone())
+                                            }
+                                            "dbfilename" => {
+                                                Value::BulkString(shared_state.read().await.dbfilename.clone())
+                                            }
+                                            _ => Value::Empty
+                                        }
+                                    }
+                                    _ => {
+                                            Value::Empty
+                                        }
+                                };
+                                response
+                            }
 
                             _ => {
                                 println!("unknown command, {} : {:?}", command, args);
@@ -439,7 +458,7 @@ impl State {
             port,
             processed: 0,
             dir,
-            dbfilename
+            dbfilename,
         }
     }
 
