@@ -332,10 +332,16 @@ async fn handle_stream(
                                     "get" => {
                                         match args[1].clone().decode().to_lowercase().as_str() {
                                             "dir" => {
-                                                Value::BulkString(shared_state.read().await.dir.clone())
+                                                Value::Array(vec![
+                                                    Value::BulkString("dir".to_string()),
+                                                    Value::BulkString(shared_state.read().await.dir.clone())
+                                                ])
                                             }
                                             "dbfilename" => {
-                                                Value::BulkString(shared_state.read().await.dbfilename.clone())
+                                                Value::Array(vec![
+                                                    Value::BulkString("dbfilename".to_string()),
+                                                    Value::BulkString(shared_state.read().await.dbfilename.clone())
+                                                ])
                                             }
                                             _ => Value::Empty
                                         }
