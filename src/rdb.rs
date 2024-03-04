@@ -44,7 +44,7 @@ impl RdbReader {
             return None;
         }
 
-        let mut index = index + 1;
+        let mut index = index;
         let mut expiry = SystemTime::now() + Duration::from_secs(60);
         if s[index] == 0xFD {
             let timestamp: u32 = u32::from_le_bytes(s[index+1..index+5].try_into().unwrap());
