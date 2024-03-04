@@ -27,6 +27,13 @@ impl Display for RedisValue {
         }
     }
 }
+impl RedisValue {
+    pub fn to_string(self) -> String {
+        match self {
+            RedisValue::String(s) => s,
+        }
+    }
+}
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum Role {
@@ -34,8 +41,13 @@ pub enum Role {
     Slave,
 }
 
+pub struct Item {
+    pub value: RedisValue,
+    pub expire: SystemTime,
+}
+
 pub struct Redis {
-    store: HashMap<String, (RedisValue, SystemTime)>,
+    store: HashMap<String, Item>,
     expr: Duration,
     pub role: Role,
     pub port: u16,
@@ -50,9 +62,9 @@ pub struct Redis {
 const DEFAULT_EXPIRY: Duration = Duration::from_secs(60);
 
 impl Redis {
-    pub fn new(port: u16) -> Self {
+    pub fn new(port: u16, store: HashMap<String, Item>) -> Self {
         Self {
-            store: HashMap::<String, (RedisValue, SystemTime)>::new(),
+            store,
             expr: DEFAULT_EXPIRY,
             role: Role::Master,
             port,
@@ -70,7 +82,7 @@ impl Redis {
         // HandShake to master
 
         Self {
-            store: HashMap::<String, (RedisValue, SystemTime)>::new(),
+            store: HashMap::<String, Item>::new(),
             expr: DEFAULT_EXPIRY,
             role: Role::Slave,
             port,
@@ -93,7 +105,10 @@ impl Redis {
         println!("set happens on {}", self.port);
         self.store.insert(
             key.clone(),
-            (value.clone(), SystemTime::now() + expr.unwrap_or(self.expr)),
+            Item {
+                value: value.clone(),
+                expire: SystemTime::now() + expr.unwrap_or(self.expr),
+            },
         );
         let set_command = SET::new(key.clone(), value.to_string(), expr).serialize();
         // if self.slaves.len() > 0 {
@@ -125,16 +140,20 @@ impl Redis {
     pub async fn get(&mut self, key: String) -> Option<String> {
         sleep(Duration::from_millis(10)).await;
         match self.store.get(&key) {
-            Some((RedisValue::String(value), expr)) => {
-                if *expr < SystemTime::now() {
+            Some(item) => {
+                if item.expire < SystemTime::now() {
                     self.store.remove(&key);
                     None
                 } else {
-                    Some(value.clone())
+                    Some(item.value.clone().to_string())
                 }
             }
             None => None,
         }
+    }
+
+    pub fn keys(&self) -> Vec<String> {
+        self.store.keys().map(|k| k.to_string()).collect()
     }
 
     pub fn info(&self) -> String {

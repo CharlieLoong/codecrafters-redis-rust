@@ -5,6 +5,7 @@ mod redis;
 mod resp;
 
 use std::{
+    collections::HashMap,
     env::args,
     net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
@@ -23,6 +24,7 @@ use tokio::{
     sync::{mpsc, Mutex, RwLock},
 };
 
+use crate::rdb::RdbReader;
 use crate::redis::Role;
 
 /// Simple program to greet a person
@@ -42,8 +44,8 @@ async fn main() {
     let mut master_host_ipv4 = None;
     let mut master_port = None;
     let mut is_slave = false;
-    let mut dir = "/tmp/redis-files".to_string();
-    let mut dbfilename = "dump.rdb".to_string();
+    let mut dir = None;
+    let mut dbfilename = None;
 
     // let mut slaves: Mutex<Vec<Replica>> = Mutex::new(vec![]);
 
@@ -68,20 +70,26 @@ async fn main() {
                 );
             }
             "--dir" => {
-                dir = args_iter.next().unwrap();
+                dir = Some(args_iter.next().unwrap());
             }
             "--dbfilename" => {
-                dbfilename = args_iter.next().unwrap();
+                dbfilename = Some(args_iter.next().unwrap());
             }
             _ => {}
         }
     }
 
     println!("Logs from your program will appear here!");
-    //let (tx, mut rx) = mpsc::unbounded_channel::<BytesMut>();
+    let rdb_map = if dir.is_none() || dbfilename.is_none() {
+        HashMap::new()
+    } else {
+        let file_path = dir.clone().unwrap() + "/" + &dbfilename.clone().unwrap();
+
+        RdbReader::read_from_file(file_path)
+    };
 
     let redis = if role == Role::Master {
-        redis::Redis::new(port)
+        redis::Redis::new(port, rdb_map)
     } else {
         is_slave = true;
         master_host_ipv4 = if master_host.clone().unwrap() == "localhost" {
@@ -93,7 +101,12 @@ async fn main() {
     };
 
     let redis = Arc::new(Mutex::new(redis));
-    let shared_state = Arc::new(RwLock::new(State::new(role, port, dir, dbfilename)));
+    let shared_state = Arc::new(RwLock::new(State::new(
+        role,
+        port,
+        dir.unwrap_or("null".to_string()),
+        dbfilename.unwrap_or("null".to_string()),
+    )));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
@@ -343,14 +356,18 @@ async fn handle_stream(
                                                     Value::BulkString(shared_state.read().await.dbfilename.clone())
                                                 ])
                                             }
-                                            _ => Value::Empty
+                                            _ => todo!()
                                         }
                                     }
-                                    _ => {
-                                            Value::Empty
-                                        }
+                                    _ => todo!()
                                 };
                                 response
+                            }
+
+                            "keys" => {
+                                let _pattern = args[0].clone().decode().to_string();
+                                let keys = redis_clone.lock().await.keys();
+                                Value::Array(keys.iter().map(|k| Value::BulkString(k.to_string())).collect())
                             }
 
                             _ => {
