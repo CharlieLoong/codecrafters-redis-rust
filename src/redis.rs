@@ -138,7 +138,7 @@ impl Redis {
     }
 
     pub async fn get(&mut self, key: String) -> Option<String> {
-        sleep(Duration::from_millis(10)).await;
+        sleep(Duration::from_millis(20)).await;
         match self.store.get(&key) {
             Some(item) => {
                 if item.expire < SystemTime::now() {
