@@ -42,6 +42,8 @@ async fn main() {
     let mut master_host_ipv4 = None;
     let mut master_port = None;
     let mut is_slave = false;
+    let mut dir = "/tmp/redis-files".to_string();
+    let mut dbfilename = "dump.rdb".to_string();
 
     // let mut slaves: Mutex<Vec<Replica>> = Mutex::new(vec![]);
 
@@ -65,6 +67,12 @@ async fn main() {
                         .expect("invalid port number"),
                 );
             }
+            "--dir" => {
+                dir = args_iter.next().unwrap();
+            }
+            "--dbfilename" => {
+                dbfilename = args_iter.next().unwrap();
+            }
             _ => {}
         }
     }
@@ -85,7 +93,7 @@ async fn main() {
     };
 
     let redis = Arc::new(Mutex::new(redis));
-    let shared_state = Arc::new(RwLock::new(State::new(role, port)));
+    let shared_state = Arc::new(RwLock::new(State::new(role, port, dir, dbfilename)));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
@@ -418,16 +426,20 @@ pub struct State {
     pub offset: usize,
     pub port: u16,
     pub processed: usize,
+    pub dir: String,
+    pub dbfilename: String,
 }
 
 impl State {
-    pub fn new(role: Role, port: u16) -> Self {
+    pub fn new(role: Role, port: u16, dir: String, dbfilename: String) -> Self {
         Self {
             role,
             slaves: Vec::new(),
             offset: 0,
             port,
             processed: 0,
+            dir,
+            dbfilename
         }
     }
 
