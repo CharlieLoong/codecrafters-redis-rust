@@ -254,7 +254,10 @@ async fn handle_stream(
                                 res
                             }
                             "get" => {
-                                let key = unpack_bulk_str(args[0].clone()).unwrap();
+                                let mut key = unpack_bulk_str(args[0].clone()).unwrap();
+                                if key.starts_with("\"") && key.ends_with("\"") {
+                                    key = key[1..key.len() - 1].to_owned();
+                                }
                                 let res = match redis_clone.lock().await.get(key).await {
                                     Some(val) => Value::BulkString(val),
                                     None => Value::Null,
