@@ -51,10 +51,11 @@ impl RdbReader {
             expiry = UNIX_EPOCH + Duration::from_secs(timestamp as u64);
             index += 5;
         } else if s[index] == 0xFC {
-            let timestamp: u32 = u32::from_le_bytes(s[index+1..index+5].try_into().unwrap());
+            let timestamp = u64::from_le_bytes(s[index+1..index+8].try_into().unwrap());
             expiry = UNIX_EPOCH + Duration::from_millis(timestamp as u64);
             index += 5;
         }
+        println!("new expr {:?}", expiry);
 
         index += 1; // TYPE
         let key;
