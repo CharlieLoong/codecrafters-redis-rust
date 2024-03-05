@@ -222,9 +222,15 @@ impl Redis {
     pub fn xrange(
         &self,
         stream_key: String,
-        start: String,
-        end: String,
+        mut start: String,
+        mut end: String,
     ) -> Option<Vec<(String, Vec<(String, String)>)>> {
+        if start == "-" {
+            start = "0".to_string();
+        }
+        if end == "+" {
+            end = "2000000000000".to_string() //TODO
+        }
         match self.store.get(&stream_key) {
             Some(item) => {
                 if let RedisValue::Stream(stream) = &item.value {
@@ -238,9 +244,9 @@ impl Redis {
                         }
                         result.push((id.clone(), item.clone()));
                     }
-                    return Some(result)
+                    return Some(result);
                 }
-                return None
+                return None;
             }
             _ => None,
         }
