@@ -27,6 +27,7 @@ pub enum Value {
     Null,
     SYNC(String),
     Integers(i64),
+    Error(String)
 }
 impl Value {
     pub fn serialize(&self) -> BytesMut {
@@ -59,6 +60,7 @@ impl Value {
                 .into(),
             Value::Multiple(_) => todo!(),
             Value::Integers(i) => format!(":{}\r\n", i).as_bytes().into(),
+            Value::Error(e) => format!("-Error {}\r\n", e).as_bytes().into(),
             _ => unimplemented!(),
         }
     }

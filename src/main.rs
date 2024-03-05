@@ -389,8 +389,10 @@ async fn handle_stream(
                                     let value = args_iter.next().expect("Expect value").clone().decode().to_string();
                                     items.push((key, value));
                                 }
-                                let id = redis_clone.lock().await.xadd(stream_key, id, items).await;
-                                Value::BulkString(id)
+                                match redis_clone.lock().await.xadd(stream_key, id, items).await {
+                                    Ok(id) => Value::BulkString(id),
+                                    Err(e) => Value::Error(e.to_string())
+                                }
                             }
 
                             _ => {

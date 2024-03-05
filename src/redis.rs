@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 #[allow(dead_code)]
 use anyhow::Result;
 use bytes::BytesMut;
@@ -167,21 +168,39 @@ impl Redis {
         stream_key: String,
         id: String,
         items: Vec<(String, String)>,
-    ) -> String {
+    ) -> Result<String> {
+        let (millis, sequence) = Self::parse_stream_id(&id)?;
+        let mut err: Option<&str> = None;
         self.store
             .entry(stream_key)
             .and_modify(|item| {
                 if let RedisValue::Stream(ref mut stream) = item.value {
-                    stream.push((id.clone(), items.clone()))
+                    let last_id = &stream.last().unwrap().0;
+                    let (last_millis, last_sequence) = Self::parse_stream_id(last_id).unwrap();
+                    if !(millis > last_millis || (millis == last_millis && sequence > last_sequence)) {
+                        err = Some("ERR The ID specified in XADD is equal or smaller than the target stream top item");
+                    }
+                    stream.push((id.clone(), items.clone()));
+                } else {
+                    err = Some("bad key, wrong type of value");
                 }
             })
             .or_insert(Item {
-                value: RedisValue::Stream(vec![]),
+                value: RedisValue::Stream(vec![(id.clone(), items)]),
                 expire: SystemTime::now() + Duration::from_secs(6000),
             });
-        id
+        if let Some(err) = err {
+            return Err(anyhow!(err));
+        }
+        Ok(id)
     }
 
+    fn parse_stream_id(id: &String) -> Result<(u64, u64)> {
+        let id_vec: Vec<&str> = id.split('-').collect();
+        let millis = id_vec.get(0).expect("should have a millis");
+        let sequence = id_vec.get(1).expect("should have a sequence");
+        Ok((millis.parse().unwrap(), sequence.parse().unwrap()))
+    }
     pub fn info(&self) -> String {
         let mut info = vec![];
         match self.role {
