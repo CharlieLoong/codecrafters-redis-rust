@@ -423,18 +423,20 @@ async fn handle_stream(
                                 }
                                 let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![]);
                                 let resp_arr =
-                                res.iter().map(|x| {
+                                res.iter().map(|keys_arr| {
                                     Value::Array(vec![
-                                        Value::BulkString(x.0.to_string()),
-                                        Value::Array(x.1.iter().map(|y| {
+                                        Value::BulkString(keys_arr.0.to_string()), // key
+                                        Value::Array(vec![Value::Array(keys_arr.1.iter().map(|ids_arr| {
                                             [
-                                                Value::BulkString(y.0.to_string()),
-                                                Value::Array(y.1.iter().map(|y| {
-                                            [Value::BulkString(y.0.to_string()),
-                                            Value::BulkString(y.1.to_string()),]
+                                                Value::BulkString(ids_arr.0.to_string()), // id
+                                                Value::Array(ids_arr.1.iter().map(|pairs| {
+                                            [
+                                                Value::BulkString(pairs.0.to_string()), // item
+                                                Value::BulkString(pairs.1.to_string()),
+                                            ]
                                         }).collect::<Vec<_>>().concat()),
                                             ]
-                                        }).collect::<Vec<_>>().concat())
+                                        }).collect::<Vec<_>>().concat())])
                                     ])
                                 }).collect::<Vec<_>>();
 
