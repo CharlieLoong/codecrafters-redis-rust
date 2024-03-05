@@ -242,6 +242,7 @@ impl Redis {
         } else {
             let cur_millis = cur_millis.parse::<u64>()?;
             let cur_sequence = cur_sequence.parse::<u64>()?;
+            println!("{} {} {} {}", cur_millis, cur_sequence, last_millis, last_sequence)
             if !(cur_millis > last_millis || (cur_millis == last_millis && cur_sequence > last_sequence)) {
                 return Err(anyhow!("ERR The ID specified in XADD is equal or smaller than the target stream top item"));
             }
