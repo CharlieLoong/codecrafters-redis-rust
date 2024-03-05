@@ -249,25 +249,29 @@ impl Redis {
 
     pub fn xread(
         &self,
-        stream_key: String,
-        mut start: String,
-    ) -> Option<Vec<(String, Vec<(String, String)>)>> {
-        match self.store.get(&stream_key) {
-            Some(item) => {
-                if let RedisValue::Stream(stream) = &item.value {
-                    let mut result = Vec::new();
-                    for (id, item) in stream.iter() {
-                        if *id <= start {
-                            continue;
+        count: usize,
+        stream_keys: Vec<String>,
+        starts: Vec<String>,
+    ) -> Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> {
+        let mut ret = Vec::new();
+        for i in 0..count {
+            match self.store.get(&stream_keys[i]) {
+                Some(item) => {
+                    if let RedisValue::Stream(stream) = &item.value {
+                        let mut result = Vec::new();
+                        for (id, item) in stream.iter() {
+                            if *id <= starts[i] {
+                                continue;
+                            }
+                            result.push((id.clone(), item.clone()));
                         }
-                        result.push((id.clone(), item.clone()));
+                        ret.push((stream_keys[i], result));
                     }
-                    return Some(result);
                 }
-                None
+                _ => {}
             }
-            _ => None,
         }
+        Some(ret)
     }
 
     fn parse_stream_id(mut id: String, last_id: String) -> Result<String> {

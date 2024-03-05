@@ -414,21 +414,31 @@ async fn handle_stream(
                                 Value::Array(resp_arr)
                             }
                             "xread" => {
-                                let stream_key = args[1].clone().decode().to_string();
-                                let start = args[2].clone().decode().to_string();
-                                let res = redis_clone.lock().await.xread(stream_key.clone(), start).unwrap_or(vec![]);
+                                let pairs_count = (args.len() - 1) / 2; // pairs
+                                let mut keys = vec![];
+                                let mut starts = vec![];
+                                for i in 1..=pairs_count {
+                                    keys.push(args[i].clone().decode().to_string());
+                                    starts.push(args[i + pairs_count].clone().decode().to_string());
+                                }
+                                let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![]);
                                 let resp_arr =
                                 res.iter().map(|x| {
                                     Value::Array(vec![
                                         Value::BulkString(x.0.to_string()),
                                         Value::Array(x.1.iter().map(|y| {
+                                            [
+                                                Value::BulkString(y.0.to_string()),
+                                                Value::Array(y.1.iter().map(|y| {
                                             [Value::BulkString(y.0.to_string()),
                                             Value::BulkString(y.1.to_string()),]
+                                        }).collect::<Vec<_>>().concat()),
+                                            ]
                                         }).collect::<Vec<_>>().concat())
                                     ])
                                 }).collect::<Vec<_>>();
 
-                                Value::Array(vec![Value::Array(vec![Value::BulkString(stream_key), Value::Array(resp_arr)])])
+                                Value::Array(vec![Value::Array(resp_arr)])
                             }
 
                             _ => {
