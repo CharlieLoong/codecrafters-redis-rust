@@ -379,6 +379,20 @@ async fn handle_stream(
                                 Value::SimpleString(redis_clone.lock().await._type(key).await)
                             }
 
+                            "xadd" => {
+                                let stream_key = args[0].clone().decode().to_string();
+                                let id = args[1].clone().decode().to_string();
+                                let mut items = vec![];
+                                let mut args_iter = args.iter().skip(2);
+                                while let Some(k) = args_iter.next() {
+                                    let key = k.clone().decode().to_string();
+                                    let value = args_iter.next().expect("Expect value").clone().decode().to_string();
+                                    items.push((key, value));
+                                }
+                                let id = redis_clone.lock().await.xadd(stream_key, id, items).await;
+                                Value::BulkString(id)
+                            }
+
                             _ => {
                                 println!("unknown command, {} : {:?}", command, args);
                                 Value::Empty

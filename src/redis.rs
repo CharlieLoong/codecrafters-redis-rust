@@ -19,11 +19,13 @@ use crate::command::SET;
 #[derive(Debug, Clone)]
 pub enum RedisValue {
     String(String),
+    Stream(Vec<(String, Vec<(String, String)>)>),
 }
 impl Display for RedisValue {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             RedisValue::String(s) => write!(f, "{}", s),
+            _ => write!(f, "undefined"),
         }
     }
 }
@@ -31,8 +33,17 @@ impl RedisValue {
     pub fn to_string(self) -> String {
         match self {
             RedisValue::String(s) => s,
+            _ => "undefined".to_string(),
         }
     }
+
+    // pub fn unwrap(self) -> _ {
+    //     match self {
+    //         Self::String(s) => s,
+    //         Self::Stream(s) => s,
+    //         _ => "undefined".to_string(),
+    //     }
+    // }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -40,7 +51,7 @@ pub enum Role {
     Master,
     Slave,
 }
-
+#[derive(Clone)]
 pub struct Item {
     pub value: RedisValue,
     pub expire: SystemTime,
@@ -111,25 +122,10 @@ impl Redis {
             },
         );
         let set_command = SET::new(key.clone(), value.to_string(), expr).serialize();
-        // if self.slaves.len() > 0 {
-        //     let slave_address = "127.0.0.1:6380".to_socket_addrs()?.next().unwrap();
-        //     let mut stream = TcpStream::connect(slave_address).await?;
-        //     stream
-        //         .write(set_command.clone().serialize().as_bytes())
-        //         .await?;
-        // }
 
-        // println!("{:?}", self.port);
-        // println!("{:?}", self.slaves.len());
         for slave in &self.slaves {
             print!("write to slave listening on port ");
             println!("{}", slave.port);
-            // let slave_address = format!("127.0.0.1:{}", 6380).to_socket_addrs()?.next().unwrap();
-            // let mut stream = TcpStream::connect(slave_address).await?;
-            // stream
-            //     .write(set_command.clone().serialize().as_bytes())
-            //     .await?;
-            // println!("{}", set_command.clone().serialize());
             let _ = slave
                 .channel
                 .send(BytesMut::from(set_command.clone().serialize()));
@@ -157,10 +153,33 @@ impl Redis {
     }
 
     pub async fn _type(&mut self, key: String) -> String {
-        match self.get(key).await {
-            Some(_) => "string".to_string(),
+        match self.store.get(&key) {
+            Some(item) => match item.value {
+                RedisValue::Stream(_) => "stream".to_owned(),
+                RedisValue::String(_) => "string".to_owned(),
+            },
             None => "none".to_string(),
         }
+    }
+
+    pub async fn xadd(
+        &mut self,
+        stream_key: String,
+        id: String,
+        items: Vec<(String, String)>,
+    ) -> String {
+        self.store
+            .entry(stream_key)
+            .and_modify(|item| {
+                if let RedisValue::Stream(ref mut stream) = item.value {
+                    stream.push((id.clone(), items.clone()))
+                }
+            })
+            .or_insert(Item {
+                value: RedisValue::Stream(vec![]),
+                expire: SystemTime::now() + Duration::from_secs(6000),
+            });
+        id
     }
 
     pub fn info(&self) -> String {
