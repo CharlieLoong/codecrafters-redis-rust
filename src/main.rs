@@ -373,6 +373,12 @@ async fn handle_stream(
                                 Value::Array(keys.iter().map(|k| Value::BulkString(k.to_string())).collect())
                             }
 
+                            "type" => {
+                                let key = args[0].clone().decode().to_string();
+
+                                Value::SimpleString(redis_clone.lock().await._type(key).await)
+                            }
+
                             _ => {
                                 println!("unknown command, {} : {:?}", command, args);
                                 Value::Empty

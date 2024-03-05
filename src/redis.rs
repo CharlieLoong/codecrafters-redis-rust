@@ -156,6 +156,13 @@ impl Redis {
         self.store.keys().map(|k| k.to_string()).collect()
     }
 
+    pub async fn _type(&mut self, key: String) -> String {
+        match self.get(key).await {
+            Some(_) => "string".to_string(),
+            None => "none".to_string(),
+        }
+    }
+
     pub fn info(&self) -> String {
         let mut info = vec![];
         match self.role {
