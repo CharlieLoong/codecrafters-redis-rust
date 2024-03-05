@@ -109,12 +109,7 @@ impl Redis {
         }
     }
 
-    pub fn set(
-        &mut self,
-        key: String,
-        value: RedisValue,
-        expr: Option<Duration>,
-    ) -> Result<()> {
+    pub fn set(&mut self, key: String, value: RedisValue, expr: Option<Duration>) -> Result<()> {
         println!("set happens on {}", self.port);
         self.store.insert(
             key.clone(),
@@ -226,10 +221,10 @@ impl Redis {
         mut end: String,
     ) -> Option<Vec<(String, Vec<(String, String)>)>> {
         if start == "-" {
-            start = "0".to_string();
+            start = "0-0".to_string();
         }
         if end == "+" {
-            end = "2000000000000".to_string() //TODO
+            end = "2000000000000-0".to_string() //TODO
         }
         match self.store.get(&stream_key) {
             Some(item) => {
@@ -247,6 +242,29 @@ impl Redis {
                     return Some(result);
                 }
                 return None;
+            }
+            _ => None,
+        }
+    }
+
+    pub fn xread(
+        &self,
+        stream_key: String,
+        mut start: String,
+    ) -> Option<Vec<(String, Vec<(String, String)>)>> {
+        match self.store.get(&stream_key) {
+            Some(item) => {
+                if let RedisValue::Stream(stream) = &item.value {
+                    let mut result = Vec::new();
+                    for (id, item) in stream.iter() {
+                        if *id <= start {
+                            continue;
+                        }
+                        result.push((id.clone(), item.clone()));
+                    }
+                    return Some(result);
+                }
+                None
             }
             _ => None,
         }

@@ -413,6 +413,23 @@ async fn handle_stream(
 
                                 Value::Array(resp_arr)
                             }
+                            "xread" => {
+                                let stream_key = args[0].clone().decode().to_string();
+                                let start = args[1].clone().decode().to_string();
+                                let res = redis_clone.lock().await.xread(stream_key.clone(), start).unwrap_or(vec![]);
+                                let resp_arr =
+                                res.iter().map(|x| {
+                                    Value::Array(vec![
+                                        Value::BulkString(x.0.to_string()),
+                                        Value::Array(x.1.iter().map(|y| {
+                                            [Value::BulkString(y.0.to_string()),
+                                            Value::BulkString(y.1.to_string()),]
+                                        }).collect::<Vec<_>>().concat())
+                                    ])
+                                }).collect::<Vec<_>>();
+
+                                Value::Array(vec![Value::BulkString(stream_key), Value::Array(resp_arr)])
+                            }
 
                             _ => {
                                 println!("unknown command, {} : {:?}", command, args);
