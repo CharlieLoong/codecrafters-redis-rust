@@ -457,7 +457,7 @@ fn _broadcast_to_replica() {
 async fn handle_wait(
     wait_cnt: usize,
     timeout: u64,
-    redis_clone: Arc<Mutex<redis::Redis>>,
+    _redis_clone: Arc<Mutex<redis::Redis>>,
     shared_state: Arc<RwLock<State>>,
 ) -> usize {
     if shared_state.read().await.offset == 0 {

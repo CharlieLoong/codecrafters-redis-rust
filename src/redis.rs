@@ -2,6 +2,7 @@ use anyhow::anyhow;
 #[allow(dead_code)]
 use anyhow::Result;
 use bytes::BytesMut;
+use itertools::Itertools;
 use rand::{distributions::Alphanumeric, Rng};
 
 use tokio::sync::mpsc;
@@ -169,40 +170,82 @@ impl Redis {
         id: String,
         items: Vec<(String, String)>,
     ) -> Result<String> {
-        let (millis, sequence) = Self::parse_stream_id(&id)?;
-        let mut err: Option<&str> = None;
-        self.store
-            .entry(stream_key)
-            .and_modify(|item| {
-                if let RedisValue::Stream(ref mut stream) = item.value {
+        if let Some(item) = self.store.get_mut(&stream_key) {
+            match &item.value {
+                RedisValue::Stream(stream) => {
                     let last_id = &stream.last().unwrap().0;
-                    let (last_millis, last_sequence) = Self::parse_stream_id(last_id).unwrap();
-                    if !(millis > last_millis || (millis == last_millis && sequence > last_sequence)) {
-                        err = Some("ERR The ID specified in XADD is equal or smaller than the target stream top item");
-                    }
-                    stream.push((id.clone(), items.clone()));
-                } else {
-                    err = Some("bad key, wrong type of value");
+                    let id = Self::parse_stream_id(id.clone(), last_id.clone())?;
                 }
-            })
-            .or_insert(Item {
-                value: RedisValue::Stream(vec![(id.clone(), items)]),
-                expire: SystemTime::now() + Duration::from_secs(6000),
-            });
-        if let Some(err) = err {
-            return Err(anyhow!(err));
+                _ => return Err(anyhow!("Stream key is not a stream")),
+            }
+        } else {
+            let id = Self::parse_stream_id(id.clone(), "0-0".to_string())?;
+            self.store.insert(
+                stream_key,
+                Item {
+                    value: RedisValue::Stream(vec![(id.clone(), items)]),
+                    expire: SystemTime::now() + Duration::from_secs(6000), // TODO
+                },
+            );
         }
+        // let (millis, sequence) = Self::parse_stream_id(&id)?;
+        // let mut err: Option<&str> = None;
+        // self.store
+        //     .entry(stream_key)
+        //     .and_modify(|item| {
+        //         if let RedisValue::Stream(ref mut stream) = item.value {
+        //             let last_id = &stream.last().unwrap().0;
+        //             let (last_millis, last_sequence) = Self::parse_stream_id(last_id).unwrap();
+        //             if sequence == '*' as u64 {
+
+        //             }
+        //             if !(millis > last_millis || (millis == last_millis && sequence > last_sequence)) {
+        //                 err = Some("ERR The ID specified in XADD is equal or smaller than the target stream top item");
+        //             }
+        //             stream.push((id.clone(), items.clone()));
+        //         } else {
+        //             err = Some("bad key, wrong type of value");
+        //         }
+        //     })
+        //     .or_insert(Item {
+        //         value: RedisValue::Stream(vec![(id.clone(), items)]),
+        //         expire: SystemTime::now() + Duration::from_secs(6000),
+        //     });
+        // if let Some(err) = err {
+        //     return Err(anyhow!(err));
+        // }
         Ok(id)
     }
 
-    fn parse_stream_id(id: &String) -> Result<(u64, u64)> {
+    fn parse_stream_id(mut id: String, last_id: String) -> Result<String> {
         if id == "0-0" {
-            return Err(anyhow!("ERR The ID specified in XADD must be greater than 0-0"));
+            return Err(anyhow!(
+                "ERR The ID specified in XADD must be greater than 0-0"
+            ));
         }
-        let id_vec: Vec<&str> = id.split('-').collect();
-        let millis = id_vec.get(0).ok_or(anyhow!("should have a millis"))?;
-        let sequence = id_vec.get(1).ok_or(anyhow!("should have a sequence"))?;
-        Ok((millis.parse().unwrap(), sequence.parse().unwrap()))
+        let (last_millis, last_sequence) = last_id
+            .split("-")
+            .map(|s| s.parse::<u64>().unwrap())
+            .take(2)
+            .collect_tuple()
+            .unwrap();
+        let (cur_millis, mut cur_sequence) = last_id
+            .split("-")
+            .take(2)
+            .map(str::to_string)
+            .collect_tuple()
+            .unwrap();
+        if cur_sequence == "*" {
+            cur_sequence = last_sequence.to_string();
+            id = format!("{}-{}", cur_millis, cur_sequence);
+        } else {
+            let cur_millis = cur_millis.parse::<u64>()?;
+            let cur_sequence = cur_sequence.parse::<u64>()?;
+            if !(cur_millis > last_millis || (cur_millis == last_millis && cur_sequence > last_sequence)) {
+                return Err(anyhow!("ERR The ID specified in XADD is equal or smaller than the target stream top item"));
+            }
+        }
+        Ok(id)
     }
     pub fn info(&self) -> String {
         let mut info = vec![];
