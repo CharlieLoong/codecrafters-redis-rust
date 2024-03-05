@@ -238,11 +238,15 @@ impl Redis {
             .map(str::to_string)
             .collect_tuple()
             .unwrap();
+        let cur_millis = cur_millis.parse::<u64>()?;
         if cur_sequence == "*" {
-            cur_sequence = (last_sequence + 1).to_string();
+            let cur_sequence = if cur_millis == last_millis {
+                last_sequence + 1
+            } else {
+                0
+            };
             id = format!("{}-{}", cur_millis, cur_sequence);
         } else {
-            let cur_millis = cur_millis.parse::<u64>()?;
             let cur_sequence = cur_sequence.parse::<u64>()?;
             // println!(
             //     "{} {} {} {}",
