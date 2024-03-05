@@ -136,7 +136,7 @@ impl Redis {
     }
 
     pub async fn get(&mut self, key: String) -> Option<String> {
-        sleep(Duration::from_millis(20)).await; // test 13 sometimes failed
+        // sleep(Duration::from_millis(20)).await; // test 13 sometimes failed
         match self.store.get(&key) {
             Some(item) => {
                 if item.expire < SystemTime::now() {
@@ -219,6 +219,33 @@ impl Redis {
         // }
     }
 
+    pub fn xrange(
+        &self,
+        stream_key: String,
+        start: String,
+        end: String,
+    ) -> Option<Vec<(String, Vec<(String, String)>)>> {
+        match self.store.get(&stream_key) {
+            Some(item) => {
+                if let RedisValue::Stream(stream) = &item.value {
+                    let mut result = Vec::new();
+                    for (id, item) in stream.iter() {
+                        if *id < start {
+                            continue;
+                        }
+                        if *id > end {
+                            break;
+                        }
+                        result.push((id.clone(), item.clone()));
+                    }
+                    return Some(result)
+                }
+                return None
+            }
+            _ => None,
+        }
+    }
+
     fn parse_stream_id(mut id: String, last_id: String) -> Result<String> {
         println!("cur id: {}, last id: {}", id, last_id);
         if id == "0-0" {
@@ -227,7 +254,14 @@ impl Redis {
             ));
         }
         if id == "*" {
-            return Ok(format!("{}-{}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(), 0)); 
+            return Ok(format!(
+                "{}-{}",
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis(),
+                0
+            ));
         }
         let (last_millis, last_sequence) = last_id
             .split("-")

@@ -395,6 +395,13 @@ async fn handle_stream(
                                 }
                             }
 
+                            "xrange" => {
+                                let stream_key = args[0].clone().decode().to_string();
+                                let start = args[1].clone().decode().to_string();
+                                let end = args[2].clone().decode().to_string();
+                                Value::Array(vec![])
+                            }
+
                             _ => {
                                 println!("unknown command, {} : {:?}", command, args);
                                 Value::Empty
