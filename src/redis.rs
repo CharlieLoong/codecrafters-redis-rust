@@ -196,9 +196,12 @@ impl Redis {
     }
 
     fn parse_stream_id(id: &String) -> Result<(u64, u64)> {
+        if id == "0-0" {
+            return Err(anyhow!("ERR The ID specified in XADD must be greater than 0-0"));
+        }
         let id_vec: Vec<&str> = id.split('-').collect();
-        let millis = id_vec.get(0).expect("should have a millis");
-        let sequence = id_vec.get(1).expect("should have a sequence");
+        let millis = id_vec.get(0).ok_or(anyhow!("should have a millis"))?;
+        let sequence = id_vec.get(1).ok_or(anyhow!("should have a sequence"))?;
         Ok((millis.parse().unwrap(), sequence.parse().unwrap()))
     }
     pub fn info(&self) -> String {
