@@ -218,6 +218,7 @@ impl Redis {
     }
 
     fn parse_stream_id(mut id: String, last_id: String) -> Result<String> {
+        println!("cur id: {}, last id: {}", id, last_id);
         if id == "0-0" {
             return Err(anyhow!(
                 "ERR The ID specified in XADD must be greater than 0-0"
@@ -236,7 +237,7 @@ impl Redis {
             .collect_tuple()
             .unwrap();
         if cur_sequence == "*" {
-            cur_sequence = last_sequence.to_string();
+            cur_sequence = (last_sequence + 1).to_string();
             id = format!("{}-{}", cur_millis, cur_sequence);
         } else {
             let cur_millis = cur_millis.parse::<u64>()?;
