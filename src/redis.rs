@@ -226,13 +226,16 @@ impl Redis {
                 "ERR The ID specified in XADD must be greater than 0-0"
             ));
         }
+        if id == "*" {
+            return Ok(format!("{}-{}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(), 0)); 
+        }
         let (last_millis, last_sequence) = last_id
             .split("-")
             .map(|s| s.parse::<u64>().unwrap())
             .take(2)
             .collect_tuple()
             .unwrap();
-        let (cur_millis, mut cur_sequence) = id
+        let (cur_millis, cur_sequence) = id
             .split("-")
             .take(2)
             .map(str::to_string)
