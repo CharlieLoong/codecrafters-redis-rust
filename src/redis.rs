@@ -265,7 +265,7 @@ impl Redis {
                             }
                             result.push((id.clone(), item.clone()));
                         }
-                        ret.push((stream_keys[i], result));
+                        ret.push((stream_keys[i].clone(), result));
                     }
                 }
                 _ => {}
