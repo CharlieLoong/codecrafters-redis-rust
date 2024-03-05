@@ -415,7 +415,7 @@ async fn handle_stream(
                             }
                             "xread" => {
                                 let stream_key = args[0].clone().decode().to_string();
-                                let start = args[1].clone().decode().to_string();
+                                let start = args[2].clone().decode().to_string();
                                 let res = redis_clone.lock().await.xread(stream_key.clone(), start).unwrap_or(vec![]);
                                 let resp_arr =
                                 res.iter().map(|x| {
