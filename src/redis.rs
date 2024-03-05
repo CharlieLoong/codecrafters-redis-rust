@@ -109,7 +109,7 @@ impl Redis {
         }
     }
 
-    pub async fn set(
+    pub fn set(
         &mut self,
         key: String,
         value: RedisValue,

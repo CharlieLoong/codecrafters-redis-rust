@@ -236,7 +236,7 @@ async fn handle_stream(
                                     .lock()
                                     .await
                                     .set(key, redis::RedisValue::String(val), expr)
-                                    .await.expect("set command failed");
+                                    .expect("set command failed");
 
                                 // println!("{}",redis_clone.lock().await.master_port.unwrap_or(000));
                                 // println!("{}",handler.stream.peer_addr().unwrap().port());
