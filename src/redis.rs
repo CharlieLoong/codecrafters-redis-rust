@@ -171,10 +171,12 @@ impl Redis {
         items: Vec<(String, String)>,
     ) -> Result<String> {
         if let Some(item) = self.store.get_mut(&stream_key) {
-            match &item.value {
-                RedisValue::Stream(stream) => {
+            match item.value {
+                RedisValue::Stream(ref mut stream) => {
                     let last_id = &stream.last().unwrap().0;
                     let id = Self::parse_stream_id(id.clone(), last_id.clone())?;
+                    stream.push((id.clone(), items));
+                    return Ok(id);
                 }
                 _ => return Err(anyhow!("Stream key is not a stream")),
             }
@@ -187,6 +189,7 @@ impl Redis {
                     expire: SystemTime::now() + Duration::from_secs(6000), // TODO
                 },
             );
+            Ok(id)
         }
         // let (millis, sequence) = Self::parse_stream_id(&id)?;
         // let mut err: Option<&str> = None;
@@ -214,7 +217,6 @@ impl Redis {
         // if let Some(err) = err {
         //     return Err(anyhow!(err));
         // }
-        Ok(id)
     }
 
     fn parse_stream_id(mut id: String, last_id: String) -> Result<String> {
@@ -230,7 +232,7 @@ impl Redis {
             .take(2)
             .collect_tuple()
             .unwrap();
-        let (cur_millis, mut cur_sequence) = last_id
+        let (cur_millis, mut cur_sequence) = id
             .split("-")
             .take(2)
             .map(str::to_string)
@@ -242,8 +244,13 @@ impl Redis {
         } else {
             let cur_millis = cur_millis.parse::<u64>()?;
             let cur_sequence = cur_sequence.parse::<u64>()?;
-            println!("{} {} {} {}", cur_millis, cur_sequence, last_millis, last_sequence)
-            if !(cur_millis > last_millis || (cur_millis == last_millis && cur_sequence > last_sequence)) {
+            // println!(
+            //     "{} {} {} {}",
+            //     cur_millis, cur_sequence, last_millis, last_sequence
+            // );
+            if !(cur_millis > last_millis
+                || (cur_millis == last_millis && cur_sequence > last_sequence))
+            {
                 return Err(anyhow!("ERR The ID specified in XADD is equal or smaller than the target stream top item"));
             }
         }
