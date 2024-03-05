@@ -428,7 +428,7 @@ async fn handle_stream(
                                     ])
                                 }).collect::<Vec<_>>();
 
-                                Value::Array(vec![Value::BulkString(stream_key), Value::Array(resp_arr)])
+                                Value::Array(Value::Array(vec![Value::BulkString(stream_key), Value::Array(resp_arr)]))
                             }
 
                             _ => {
