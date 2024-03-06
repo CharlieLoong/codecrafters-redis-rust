@@ -252,7 +252,11 @@ impl Redis {
         count: usize,
         stream_keys: Vec<String>,
         starts: Vec<String>,
+        block: u64,
     ) -> Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> {
+        // if block > 0 {
+        //     sleep(Duration::from_millis(block)).await;
+        // }
         let mut ret = Vec::new();
         for i in 0..count {
             match self.store.get(&stream_keys[i]) {

@@ -22,6 +22,7 @@ use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     sync::{mpsc, Mutex, RwLock},
+    time::sleep,
 };
 
 use crate::rdb::RdbReader;
@@ -210,7 +211,7 @@ async fn handle_stream(
                 if let Ok(Some(v)) = values {
                     println!("[receive values]: {:?}", v);
                     for value in v {
-                        let (command, args, mut len) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![], 0));
+                        let (command, mut args, mut len) = extract_command(value.clone()).unwrap_or(("Extract Failed".to_owned(), vec![], 0));
 
                         let response: Value = match command.to_lowercase().as_str() {
                             "ping" => {
@@ -413,7 +414,15 @@ async fn handle_stream(
 
                                 Value::Array(resp_arr)
                             }
+                            // redis-cli xread block 1000 streams stream_key 0-2
                             "xread" => {
+                                // let mut len = args.len();
+                                let mut block: u64 = 0;
+                                if args[0].clone().decode() == "block" {
+                                    block = args[1].clone().decode().parse().unwrap();
+                                    args = args.drain(2..).collect();
+                                }
+                                let block_end = SystemTime::now() + Duration::from_millis(block);
                                 let pairs_count = (args.len() - 1) / 2; // pairs
                                 let mut keys = vec![];
                                 let mut starts = vec![];
@@ -421,26 +430,36 @@ async fn handle_stream(
                                     keys.push(args[i].clone().decode().to_string());
                                     starts.push(args[i + pairs_count].clone().decode().to_string());
                                 }
-                                let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![]);
-                                let resp_arr =
-                                res.iter().map(|keys_arr| {
-                                    Value::Array(vec![
-                                        Value::BulkString(keys_arr.0.to_string()), // key
-                                        Value::Array(vec![Value::Array(keys_arr.1.iter().map(|ids_arr| {
-                                            [
-                                                Value::BulkString(ids_arr.0.to_string()), // id
-                                                Value::Array(ids_arr.1.iter().map(|pairs| {
-                                            [
-                                                Value::BulkString(pairs.0.to_string()), // item
-                                                Value::BulkString(pairs.1.to_string()),
-                                            ]
-                                        }).collect::<Vec<_>>().concat()),
-                                            ]
-                                        }).collect::<Vec<_>>().concat())])
-                                    ])
-                                }).collect::<Vec<_>>();
+                                let res = loop {
+                                    let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone(), block).unwrap_or(vec![]);
+                                    if SystemTime::now() > block_end {
+                                        break res;
+                                    }
+                                };
+                                let response = if res[0].1.len() == 0 {
+                                    Value::Null
+                                } else {
+                                    let resp_arr =
+                                    res.iter().map(|keys_arr| {
+                                        Value::Array(vec![
+                                            Value::BulkString(keys_arr.0.to_string()), // key
+                                            Value::Array(vec![Value::Array(keys_arr.1.iter().map(|ids_arr| {
+                                                [
+                                                    Value::BulkString(ids_arr.0.to_string()), // id
+                                                    Value::Array(ids_arr.1.iter().map(|pairs| {
+                                                [
+                                                    Value::BulkString(pairs.0.to_string()), // item
+                                                    Value::BulkString(pairs.1.to_string()),
+                                                ]
+                                            }).collect::<Vec<_>>().concat()),
+                                                ]
+                                            }).collect::<Vec<_>>().concat())])
+                                        ])
+                                    }).collect::<Vec<_>>();
 
-                                Value::Array(resp_arr)
+                                    Value::Array(resp_arr)
+                                };
+                                response
                             }
 
                             _ => {
