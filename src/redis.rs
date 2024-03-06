@@ -251,7 +251,7 @@ impl Redis {
         &self,
         count: usize,
         stream_keys: Vec<String>,
-        starts: Vec<String>,
+        mut starts: Vec<String>,
     ) -> Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> {
         // if block > 0 {
         //     sleep(Duration::from_millis(block)).await;
@@ -262,6 +262,9 @@ impl Redis {
                 Some(item) => {
                     if let RedisValue::Stream(stream) = &item.value {
                         let mut result = Vec::new();
+                        if starts[i] == "$" {
+                            starts[i] = "0-0".to_string();
+                        }
                         for (id, item) in stream.iter() {
                             if *id <= starts[i] {
                                 continue;

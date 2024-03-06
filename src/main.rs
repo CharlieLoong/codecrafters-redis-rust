@@ -432,6 +432,13 @@ async fn handle_stream(
                                 let res = match block {
                                     Some(t) => {
                                         if t > 0 {
+                                            if starts[0] == "$" {
+                                                let prev_res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![]);
+                                                let prev_ids: Vec<_> = prev_res.iter().map(|(_, v)| {
+                                                    v.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>().last().unwrap().clone()
+                                                }).collect();
+                                                starts = prev_ids;
+                                            }
                                             let block_end = SystemTime::now() + Duration::from_millis(t);
                                             loop {
                                             //polling
