@@ -417,12 +417,12 @@ async fn handle_stream(
                             // redis-cli xread block 1000 streams stream_key 0-2
                             "xread" => {
                                 // let mut len = args.len();
-                                let mut block: u64 = 0;
+                                let mut block: Option<u64> = None;
                                 if args[0].clone().decode() == "block" {
-                                    block = args[1].clone().decode().parse().unwrap();
+                                    block = Some(args[1].clone().decode().parse::<u64>().unwrap());
                                     args = args.drain(2..).collect();
                                 }
-                                let block_end = SystemTime::now() + Duration::from_millis(block);
+                                let block_end = SystemTime::now() + Duration::from_millis(block.unwrap());
                                 let pairs_count = (args.len() - 1) / 2; // pairs
                                 let mut keys = vec![];
                                 let mut starts = vec![];
@@ -430,11 +430,27 @@ async fn handle_stream(
                                     keys.push(args[i].clone().decode().to_string());
                                     starts.push(args[i + pairs_count].clone().decode().to_string());
                                 }
-                                let res = loop {
-                                    let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone(), block).unwrap_or(vec![]);
-                                    if SystemTime::now() > block_end {
-                                        break res;
+                                let res = match block {
+                                    Some(t) => {
+                                        if t > 0 {
+                                            loop {
+                                            //polling
+                                                let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![]);
+                                                if SystemTime::now() > block_end {
+                                                    break res;
+                                                }
+                                            }
+                                        } else {
+                                            loop {
+                                            //polling
+                                                let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![]);
+                                                if res[0].1.len() > 0 {
+                                                    break res;
+                                                }
+                                            }
+                                        }
                                     }
+                                    None => redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![])
                                 };
                                 let response = if res[0].1.len() == 0 {
                                     Value::Null
