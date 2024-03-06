@@ -422,7 +422,6 @@ async fn handle_stream(
                                     block = Some(args[1].clone().decode().parse::<u64>().unwrap());
                                     args = args.drain(2..).collect();
                                 }
-                                let block_end = SystemTime::now() + Duration::from_millis(block.unwrap());
                                 let pairs_count = (args.len() - 1) / 2; // pairs
                                 let mut keys = vec![];
                                 let mut starts = vec![];
@@ -433,6 +432,7 @@ async fn handle_stream(
                                 let res = match block {
                                     Some(t) => {
                                         if t > 0 {
+                                            let block_end = SystemTime::now() + Duration::from_millis(t);
                                             loop {
                                             //polling
                                                 let res = redis_clone.lock().await.xread(pairs_count, keys.clone(), starts.clone()).unwrap_or(vec![]);
